@@ -1,0 +1,42 @@
+[project]
+name = "PyGaborSTM"
+version = "0.1.0"
+description = "PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) representations from audio signals using bio-inspired auditory spectrograms and 2D Gabor filterbanks."
+authors = []
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.poetry]
+packages = [{include = "pygaborstm"}]
+
+[dependency-groups]
+core = [
+    "numpy (>=2.3.3,<3.0.0)",
+    "scipy (>=1.16.2,<2.0.0)",
+    "soundfile (>=0.13.1,<0.14.0)",
+    "pandas (>=2.3.2,<3.0.0)",
+    "pyyaml (>=6.0.2,<7.0.0)",
+    "cupy-cuda13x (>=13.6.0,<14.0.0)",
+    "librosa (>=0.11.0,<0.12.0)"
+]
+test = [
+    "pytest (>=8.4.2,<9.0.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)"
+]
+lint = [
+    "ruff (>=0.13.1,<0.14.0)"
+]
+dev = [
+    { include-group = "test" },
+    { include-group = "lint" },
+]
+notebook = [
+    "jupyter (>=1.1.1,<2.0.0)",
+    "ipykernel (>=6.30.1,<7.0.0)",
+    "matplotlib (>=3.10.6,<4.0.0)",
+    "seaborn (>=0.13.2,<0.14.0)"
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
