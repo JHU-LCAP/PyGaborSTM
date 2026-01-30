@@ -10,7 +10,7 @@ pip install pygaborstm
 
 ### From source
 ```bash
-git clone https://github.com/your-username/pygaborstm.git
+git clone https://github.com/JHU-LCAP/PyGaborSTM.git
 cd pygaborstm
 poetry install
 ```
