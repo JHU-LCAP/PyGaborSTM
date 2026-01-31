@@ -10,6 +10,7 @@ from .structs import Spectrogram, RSF
 if TYPE_CHECKING:
     from .gabor import GaborFilterbank
 
+
 def plot_spectrogram(
     spectrogram: Spectrogram | np.ndarray,
     frmlen_ms: float = 16.0,
