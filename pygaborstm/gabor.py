@@ -20,8 +20,12 @@ from .structs import Spectrogram, RSF
 
 # Default Gabor parameter options (for adaptive tuning)
 PARAM_OPTIONS = {
-    "sigma_t": np.array([1/1.4, 1/1.6, 1/1.8, 1/2.0, 1/2.2, 1/2.4, 1/2.6]),
-    "sigma_f": np.array([1/1.4, 1/1.6, 1/1.8, 1/2.0, 1/2.2, 1/2.4, 1/2.6]),
+    "sigma_t": np.array(
+        [1 / 1.4, 1 / 1.6, 1 / 1.8, 1 / 2.0, 1 / 2.2, 1 / 2.4, 1 / 2.6]
+    ),
+    "sigma_f": np.array(
+        [1 / 1.4, 1 / 1.6, 1 / 1.8, 1 / 2.0, 1 / 2.2, 1 / 2.4, 1 / 2.6]
+    ),
     "theta": np.radians(np.array([-4.5, -3.0, -1.5, 0.0, 1.5, 3.0, 4.5])),
     "alpha": np.array([0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]),
 }
@@ -38,10 +42,10 @@ class GaborFilterbank:
 
     # Resolution presets: (n_rates_positive, n_scales)
     RESOLUTION_PRESETS = {
-        "low": (5, 6),        # 60 filters (paper default)
-        "medium": (10, 12),   # 240 filters
-        "high": (20, 20),     # 800 filters
-        "ultra": (32, 32),    # 2048 filters
+        "low": (5, 6),  # 60 filters (paper default)
+        "medium": (10, 12),  # 240 filters
+        "high": (20, 20),  # 800 filters
+        "ultra": (32, 32),  # 2048 filters
     }
 
     def __init__(
@@ -97,6 +101,7 @@ class GaborFilterbank:
         """
         Create a 2D Gabor filter.
 
+
         F(ω, Ω, t, f) = α/(2πσ_t σ_f) * exp(-0.5(t₁²/σ_t² + f₁²/σ_f²)) * exp(2πj(ωt + Ωf))
 
         Args:
@@ -136,8 +141,7 @@ class GaborFilterbank:
         spec: np.ndarray,
         omega: float,
         Omega: float,
-        filter_params: Tuple[float, float,
-                             float, float] = (0.5, 0.5, 0.0, 1.0),
+        filter_params: Tuple[float, float, float, float] = (0.5, 0.5, 0.0, 1.0),
     ) -> np.ndarray:
         """
         Apply a single Gabor filter to the spectrogram.
@@ -199,18 +203,17 @@ class GaborFilterbank:
         decoded_params = self._decode_params(params)
 
         # Frame parameters
-        window_size = int(self.rsf_frame_size_ms /
-                          1000.0 / self.time_per_frame)
-        frame_shift = max(1, int(self.rsf_frame_shift_ms /
-                          1000.0 / self.time_per_frame))
+        window_size = int(self.rsf_frame_size_ms / 1000.0 / self.time_per_frame)
+        frame_shift = max(
+            1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame)
+        )
         n_frames = max(1, (n_time - window_size) // frame_shift + 1)
 
         if n_frames == 1:
             window_size = n_time
 
         # Output array
-        rsf_data = np.zeros(
-            (n_frames, len(self.rates), len(self.scales), n_freq))
+        rsf_data = np.zeros((n_frames, len(self.rates), len(self.scales), n_freq))
 
         # Apply all filters
         n_scales = len(self.scales)
@@ -220,15 +223,13 @@ class GaborFilterbank:
                 filter_params = tuple(decoded_params[filter_idx])
 
                 # Apply Gabor filter: R(ω, Ω, t, f|Λ)
-                filtered = self._apply_gabor_filter(
-                    spec, omega, Omega, filter_params)
+                filtered = self._apply_gabor_filter(spec, omega, Omega, filter_params)
 
                 # Integrate over time windows: T(ω, Ω, f|Λ) = ∫R dt
                 for k in range(n_frames):
                     start = k * frame_shift
                     end = min(start + window_size, n_time)
-                    rsf_data[k, i, j, :] = np.mean(
-                        filtered[start:end, :], axis=0)
+                    rsf_data[k, i, j, :] = np.mean(filtered[start:end, :], axis=0)
 
         # Build time axis for frames
         frame_period = self.rsf_frame_shift_ms / 1000.0
@@ -249,12 +250,14 @@ class GaborFilterbank:
 
     def _decode_params(self, indices: np.ndarray) -> np.ndarray:
         """Convert parameter indices to actual values."""
-        return np.column_stack([
-            PARAM_OPTIONS["sigma_t"][indices[:, 0]],
-            PARAM_OPTIONS["sigma_f"][indices[:, 1]],
-            PARAM_OPTIONS["theta"][indices[:, 2]],
-            PARAM_OPTIONS["alpha"][indices[:, 3]],
-        ])
+        return np.column_stack(
+            [
+                PARAM_OPTIONS["sigma_t"][indices[:, 0]],
+                PARAM_OPTIONS["sigma_f"][indices[:, 1]],
+                PARAM_OPTIONS["theta"][indices[:, 2]],
+                PARAM_OPTIONS["alpha"][indices[:, 3]],
+            ]
+        )
 
 
 def rsf(spectrogram: Spectrogram, config: GaborConfig | None = None) -> RSF:
