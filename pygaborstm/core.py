@@ -3,10 +3,10 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from .config import Config, SpectrogramConfig, GaborConfig
+from .config import Config
 from .spectrogram import AuditorySpectrogram
 from .gabor import GaborFilterbank
-from .structs import Spectrogram, RSF
+from .structs import RSF
 
 
 def load(path: str | Path) -> tuple[np.ndarray, int]:
@@ -73,12 +73,20 @@ def _apply_overrides(cfg: Config, overrides: dict) -> Config:
         return cfg
 
     spectrogram_keys = {
-        "sample_rate", "n_filters", "f_min", "octaves",
-        "tau_ms", "frmlen_ms", "constant_Q",
+        "sample_rate",
+        "n_filters",
+        "f_min",
+        "octaves",
+        "tau_ms",
+        "frmlen_ms",
+        "constant_Q",
     }
 
     gabor_keys = {
-        "n_freq_bins", "resolution", "rsf_frame_size_ms", "rsf_frame_shift_ms",
+        "n_freq_bins",
+        "resolution",
+        "rsf_frame_size_ms",
+        "rsf_frame_shift_ms",
     }
 
     for key, value in overrides.items():
@@ -97,4 +105,5 @@ def _apply_overrides(cfg: Config, overrides: dict) -> Config:
 def _resample(audio: np.ndarray, sr_orig: int, sr_target: int) -> np.ndarray:
     """Resample audio to target sample rate."""
     import librosa
+
     return librosa.resample(audio, orig_sr=sr_orig, target_sr=sr_target)

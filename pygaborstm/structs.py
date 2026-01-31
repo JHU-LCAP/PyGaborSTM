@@ -134,8 +134,8 @@ class RSF:
         """
         n_rates_half = rs.shape[1] // 2
 
-        rs_left = rs[:, :n_rates_half]       # Negative rates
-        rs_right = rs[:, n_rates_half:]      # Positive rates
+        rs_left = rs[:, :n_rates_half]  # Negative rates
+        rs_right = rs[:, n_rates_half:]  # Positive rates
 
         # Flip left so magnitudes align
         rs_left_flipped = np.flip(rs_left, axis=1)
@@ -144,9 +144,8 @@ class RSF:
         rs_folded = (rs_left_flipped + rs_right) / 2
 
         # Mirror back for symmetric visualization
-        rs_folded_mirrored = np.concatenate([
-            np.flip(rs_folded, axis=1),
-            rs_folded
-        ], axis=1)
+        rs_folded_mirrored = np.concatenate(
+            [np.flip(rs_folded, axis=1), rs_folded], axis=1
+        )
 
         return rs_folded_mirrored

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 @dataclass
 class SpectrogramConfig:
     """Configuration for auditory spectrogram."""
+
     sample_rate: int = 16000
     n_filters: int = 128
     f_min: float = 180.0
@@ -22,6 +23,7 @@ class SpectrogramConfig:
 @dataclass
 class GaborConfig:
     """Configuration for Gabor filterbank."""
+
     sample_rate: int = 16000
     n_freq_bins: int = 128
     resolution: str = "low"
@@ -32,6 +34,7 @@ class GaborConfig:
 @dataclass
 class Config:
     """Top-level configuration."""
+
     use_gpu: bool = False
     spectrogram: SpectrogramConfig = field(default_factory=SpectrogramConfig)
     gabor: GaborConfig = field(default_factory=GaborConfig)

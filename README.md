@@ -59,7 +59,7 @@ pygaborstm/
 ## Development
 ```bash
 poetry run jupyter notebook  # Run notebooks
-poetry run pytest            # Run tests
+poetry run pytest -v         # Run tests
 ```
 
 ## References

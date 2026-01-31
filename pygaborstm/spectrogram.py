@@ -12,7 +12,6 @@ Pipeline:
     y5: Leaky integration + compression
 """
 
-from pathlib import Path
 import numpy as np
 from scipy import signal
 
@@ -42,7 +41,7 @@ class AuditorySpectrogram:
         frame_adjustment = 2 ** (self.filter_order - 1)
         self.alph = np.exp(-1 / (self.tau_ms * frame_adjustment))
 
-        self.f_max = self.f_min * (2 ** self.octaves)
+        self.f_max = self.f_min * (2**self.octaves)
         self.center_freqs = self._create_frequency_scale()
         self._init_gammatone_filters()
 
@@ -82,9 +81,8 @@ class AuditorySpectrogram:
             # Normalize gain at center frequency
             w = 2 * np.pi * fc / self.sample_rate
             z = np.exp(1j * w)
-            H_section = (b0 + b1 * z**-1 + b2 * z**-2) / \
-                (a0 + a1 * z**-1 + a2 * z**-2)
-            gain = np.abs(H_section ** filter_order)
+            H_section = (b0 + b1 * z**-1 + b2 * z**-2) / (a0 + a1 * z**-1 + a2 * z**-2)
+            gain = np.abs(H_section**filter_order)
 
             if gain > 0:
                 sos[0, 0] = b0 / gain
@@ -136,7 +134,7 @@ class AuditorySpectrogram:
     def _downsample(self, spectrogram: np.ndarray) -> np.ndarray:
         """Downsample to frame rate."""
         shft = 0
-        L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate * (2 ** shft))
+        L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate * (2**shft))
 
         n_samples = spectrogram.shape[1]
         n_frames = int(np.ceil(n_samples / L_frm))
@@ -145,7 +143,7 @@ class AuditorySpectrogram:
             pad_width = ((0, 0), (0, n_frames * L_frm - n_samples))
             spectrogram = np.pad(spectrogram, pad_width, mode="constant")
 
-        return spectrogram[:, L_frm - 1:: L_frm]
+        return spectrogram[:, L_frm - 1 :: L_frm]
 
     def compute(self, audio: np.ndarray) -> Spectrogram:
         """
@@ -182,6 +180,8 @@ class AuditorySpectrogram:
         )
 
 
-def auditory_spectrogram(audio: np.ndarray, config: SpectrogramConfig | None = None) -> Spectrogram:
+def auditory_spectrogram(
+    audio: np.ndarray, config: SpectrogramConfig | None = None
+) -> Spectrogram:
     """Functional interface for computing auditory spectrogram."""
     return AuditorySpectrogram(config).compute(audio)
