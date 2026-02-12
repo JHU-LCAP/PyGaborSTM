@@ -42,7 +42,11 @@ def plot_spectrogram(
 
     # Normalize titles
     if titles is None:
-        titles = ["Auditory Spectrogram"] if n == 1 else [f"Spectrogram {i+1}" for i in range(n)]
+        titles = (
+            ["Auditory Spectrogram"]
+            if n == 1
+            else [f"Spectrogram {i + 1}" for i in range(n)]
+        )
     elif isinstance(titles, str):
         titles = [titles]
 
