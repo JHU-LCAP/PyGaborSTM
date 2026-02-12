@@ -12,12 +12,12 @@ class SpectrogramConfig:
     """Configuration for auditory spectrogram."""
 
     sample_rate: int = 16000
-    n_filters: int = 128
+    n_filters: int = 256
     f_min: float = 180.0
     octaves: float = 5.3
-    tau_ms: float = 8.0
-    frmlen_ms: float = 16.0
-    constant_Q: float = 8.0
+    tau_ms: float = 4.0
+    frmlen_ms: float = 8.0
+    constant_Q: float = 16.0
 
 
 @dataclass

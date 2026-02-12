@@ -4,6 +4,17 @@ from .spectrogram import AuditorySpectrogram, auditory_spectrogram
 from .gabor import GaborFilterbank, rsf
 from .core import load, compute_rsf
 from .plotting import plot_spectrogram, plot_rsf, plot_filterbank
+from .utils import (
+    generate_tone,
+    generate_three_tones,
+    generate_broadband_noise,
+    generate_harmonic_complex,
+    generate_moving_ripple,
+    generate_ripple_set,
+    save_three_tones,
+    save_noise,
+    save_harmonic_complexes,
+)
 
 __version__ = "0.1.0"
 
@@ -28,4 +39,14 @@ __all__ = [
     "plot_spectrogram",
     "plot_rsf",
     "plot_filterbank",
+    # Stimulus generation
+    "generate_tone",
+    "generate_three_tones",
+    "generate_broadband_noise",
+    "generate_harmonic_complex",
+    "generate_moving_ripple",
+    "generate_ripple_set",
+    "save_three_tones",
+    "save_noise",
+    "save_harmonic_complexes",
 ]

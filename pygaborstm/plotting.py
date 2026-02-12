@@ -12,48 +12,95 @@ if TYPE_CHECKING:
 
 
 def plot_spectrogram(
-    spectrogram: Spectrogram | np.ndarray,
+    spectrogram: Spectrogram | np.ndarray | list,
+    titles: str | list[str] | None = None,
     frmlen_ms: float = 16.0,
-    title: str = "Auditory Spectrogram",
-    figsize: tuple = (12, 6),
+    suptitle: str | None = None,
+    figsize: tuple | None = None,
     cmap: str = "turbo",
+    max_cols: int = 4,
 ) -> None:
     """
-    Plot auditory spectrogram.
+    Plot one or more auditory spectrograms.
 
     Args:
-        spectrogram: Spectrogram object or array [n_freq × n_time]
-        frmlen_ms: Frame length in ms (used if array provided)
-        title: Plot title
-        figsize: Figure size
+        spectrogram: Spectrogram object, array, or list of either
+        titles: Title(s) for subplot(s). String for single, list for multiple.
+        frmlen_ms: Frame length in ms (used if arrays provided)
+        suptitle: Overall figure title (optional)
+        figsize: Figure size. If None, auto-calculated.
         cmap: Colormap
+        max_cols: Maximum columns for multiple spectrograms
     """
-    if isinstance(spectrogram, Spectrogram):
-        data = spectrogram.data
-        duration = spectrogram.duration
+    # Normalize to list
+    if isinstance(spectrogram, list):
+        specs = spectrogram
     else:
-        data = spectrogram
-        n_frames = data.shape[1]
-        duration = n_frames * frmlen_ms / 1000.0
+        specs = [spectrogram]
 
-    n_filters = data.shape[0]
+    n = len(specs)
 
-    fig, ax = plt.subplots(figsize=figsize)
+    # Normalize titles
+    if titles is None:
+        titles = ["Auditory Spectrogram"] if n == 1 else [f"Spectrogram {i+1}" for i in range(n)]
+    elif isinstance(titles, str):
+        titles = [titles]
 
-    im = ax.imshow(
-        np.abs(data),
-        aspect="auto",
-        origin="lower",
-        extent=(0, duration, 0, n_filters),
-        cmap=cmap,
-        interpolation="nearest",
-    )
+    # Calculate layout
+    if n == 1:
+        n_rows, n_cols = 1, 1
+        if figsize is None:
+            figsize = (12, 6)
+    else:
+        n_cols = min(n, max_cols)
+        n_rows = (n + n_cols - 1) // n_cols
+        if figsize is None:
+            figsize = (4 * n_cols, 4 * n_rows)
 
-    ax.set_title(title)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Frequency Channel")
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
 
-    plt.colorbar(im, ax=ax, label="Amplitude")
+    for idx, (spec, title) in enumerate(zip(specs, titles)):
+        row = idx // n_cols
+        col = idx % n_cols
+        ax = axes[row, col]
+
+        # Extract data
+        if isinstance(spec, Spectrogram):
+            data = spec.data
+            duration = spec.duration
+        else:
+            data = spec
+            n_frames = data.shape[1]
+            duration = n_frames * frmlen_ms / 1000.0
+
+        n_filters = data.shape[0]
+
+        im = ax.imshow(
+            np.abs(data),
+            aspect="auto",
+            origin="lower",
+            extent=(0, duration, 0, n_filters),
+            cmap=cmap,
+            interpolation="nearest",
+        )
+
+        ax.set_title(title)
+        ax.set_xlabel("Time (s)")
+        if col == 0:
+            ax.set_ylabel("Frequency Channel")
+
+        if n == 1:
+            plt.colorbar(im, ax=ax, label="Amplitude")
+
+    # Hide empty subplots
+    for idx in range(n, n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        axes[row, col].axis("off")
+
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=12, fontweight="bold")
+
     plt.tight_layout()
     plt.show()
 
