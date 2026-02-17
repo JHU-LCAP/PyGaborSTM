@@ -62,7 +62,7 @@ class TestComputeRSF:
         assert isinstance(result, RSF)
         assert result.n_rates == 10
         assert result.n_scales == 6
-        assert result.n_freqs == 128
+        assert result.n_freqs == 256
 
     def test_missing_sr_raises(self, audio_tone):
         with pytest.raises(ValueError, match="Sample rate"):
@@ -86,7 +86,7 @@ class TestComputeRSF:
     def test_from_file_path(self, wav_mono):
         result = stm.compute_rsf(wav_mono)
         assert isinstance(result, RSF)
-        assert result.n_freqs == 128
+        assert result.n_freqs == 256
 
     def test_from_file_str(self, wav_mono):
         result = stm.compute_rsf(str(wav_mono))
@@ -96,7 +96,7 @@ class TestComputeRSF:
         """8kHz file should be resampled to 16kHz internally."""
         result = stm.compute_rsf(wav_8k)
         assert isinstance(result, RSF)
-        assert result.n_freqs == 128
+        assert result.n_freqs == 256
 
     def test_deterministic(self, audio_tone, sr):
         """Same input should produce same output."""
@@ -123,7 +123,7 @@ class TestEndToEnd:
     def test_full_pipeline_shapes(self, audio_tone, sr):
         """Verify shapes are consistent through the pipeline."""
         spec = stm.auditory_spectrogram(audio_tone)
-        assert spec.n_freqs == 128
+        assert spec.n_freqs == 256
 
         model = stm.GaborFilterbank()
         rsf = model.compute(spec)

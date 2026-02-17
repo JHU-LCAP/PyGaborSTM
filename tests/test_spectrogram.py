@@ -11,7 +11,7 @@ class TestAuditorySpectrogram:
 
     def test_output_shape(self, audio_tone):
         result = stm.auditory_spectrogram(audio_tone)
-        assert result.n_freqs == 128
+        assert result.n_freqs == 256
         assert result.n_times > 0
 
     def test_no_nans(self, audio_tone):

@@ -12,7 +12,6 @@ import soundfile as sf
 SR = 16000
 DURATION = 1.0
 
-
 def generate_tone(freq, duration=DURATION, sr=SR, amplitude=0.5):
     """Generate a pure Sine tone."""
     t = np.arange(int(duration * sr)) / sr

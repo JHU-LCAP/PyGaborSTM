@@ -5,11 +5,11 @@ class TestSpectrogramConfig:
     def test_defaults_match_paper(self):
         cfg = SpectrogramConfig()
         assert cfg.sample_rate == 16000
-        assert cfg.n_filters == 128
+        assert cfg.n_filters == 256
         assert cfg.f_min == 180.0
         assert cfg.octaves == 5.3
-        assert cfg.tau_ms == 8.0
-        assert cfg.frmlen_ms == 16.0
+        assert cfg.tau_ms == 4.0
+        assert cfg.frmlen_ms == 8.0
 
     def test_custom_values(self):
         cfg = SpectrogramConfig(n_filters=64, sample_rate=8000)

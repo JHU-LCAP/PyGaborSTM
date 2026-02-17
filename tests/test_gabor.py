@@ -41,7 +41,7 @@ class TestRSFComputation:
         result = model.compute(spectrogram_from_tone)
         assert result.n_rates == 10
         assert result.n_scales == 6
-        assert result.n_freqs == 128
+        assert result.n_freqs == 256
         assert result.n_frames > 0
 
     def test_no_nans(self, spectrogram_from_tone):
