@@ -18,17 +18,17 @@ STANDARD_SCALES = np.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0])
 def _get_freq_ticks(freqs: np.ndarray):
     """Get frequency tick positions and labels in Hz."""
     f_min, f_max = freqs[0], freqs[-1]
-    
+
     nice_freqs = [100, 200, 500, 1000, 2000, 4000, 8000]
     tick_freqs = [f for f in nice_freqs if f_min <= f <= f_max]
-    
+
     positions = []
     labels = []
     for f in tick_freqs:
         idx = np.argmin(np.abs(freqs - f))
         positions.append(idx)
         labels.append(f"{int(f)}")
-    
+
     return positions, labels
 
 

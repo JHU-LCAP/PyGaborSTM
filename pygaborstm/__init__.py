@@ -3,7 +3,13 @@ from .structs import Spectrogram, RSF
 from .spectrogram import AuditorySpectrogram, auditory_spectrogram
 from .gabor import GaborFilterbank, rsf
 from .core import load, compute_rsf
-from .plotting import plot_spectrogram, plot_spectrogram_grid, plot_rsf, plot_rsf_grid, plot_filterbank
+from .plotting import (
+    plot_spectrogram,
+    plot_spectrogram_grid,
+    plot_rsf,
+    plot_rsf_grid,
+    plot_filterbank,
+)
 from .utils import (
     generate_tone,
     generate_three_tones,
