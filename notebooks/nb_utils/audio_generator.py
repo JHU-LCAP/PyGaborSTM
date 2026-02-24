@@ -10,7 +10,7 @@ import soundfile as sf
 
 # Defaults
 SR = 16000
-DURATION = 1.0
+DURATION = 3.0
 
 
 def generate_tone(freq, duration=DURATION, sr=SR, amplitude=0.5):

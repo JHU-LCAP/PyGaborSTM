@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 STANDARD_RATES = np.array([-32, -16, -8, -4, -2, 2, 4, 8, 16, 32])
 STANDARD_SCALES = np.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0])
 
-
 def _get_freq_ticks(freqs: np.ndarray):
     """Get frequency tick positions and labels in Hz."""
     f_min, f_max = freqs[0], freqs[-1]
@@ -32,7 +31,7 @@ def _get_freq_ticks(freqs: np.ndarray):
     return positions, labels
 
 
-def plot_spectrogram(
+def plt_spectrogram(
     spectrogram: Spectrogram | np.ndarray,
     title: str = "Auditory Spectrogram",
     figsize: tuple = (12, 6),
@@ -111,7 +110,7 @@ def plot_spectrogram(
     return ax
 
 
-def plot_spectrogram_grid(
+def plt_spectrogram_grid(
     data: List[Dict],
     n_cols: int = 4,
     figsize: tuple | None = None,
@@ -152,7 +151,7 @@ def plot_spectrogram_grid(
         spectrogram = item["spectrogram"]
         title = item.get("title", f"Spectrogram {idx + 1}")
 
-        plot_spectrogram(
+        plt_spectrogram(
             spectrogram=spectrogram,
             title=title,
             cmap=cmap,
@@ -180,7 +179,7 @@ def plot_spectrogram_grid(
     plt.show()
 
 
-def plot_rsf(
+def plt_rsf(
     rsf: RSF | np.ndarray,
     rates: np.ndarray | None = None,
     scales: np.ndarray | None = None,
@@ -303,7 +302,7 @@ def plot_rsf(
     return ax
 
 
-def plot_rsf_grid(
+def plt_rsf_grid(
     data: List[Dict],
     rates: np.ndarray | None = None,
     scales: np.ndarray | None = None,
@@ -357,7 +356,7 @@ def plot_rsf_grid(
         rsf = item["rsf"]
         title = item.get("title", f"RSF {idx + 1}")
 
-        plot_rsf(
+        plt_rsf(
             rsf=rsf,
             rates=r_rates,
             scales=r_scales,
@@ -385,36 +384,4 @@ def plot_rsf_grid(
         plt.savefig(save_path, dpi=200, bbox_inches="tight")
         print(f"Saved to '{save_path}'")
 
-    plt.show()
-
-
-def plot_filterbank(
-    filterbank: "GaborFilterbank",
-    figsize: tuple = (12, 4),
-) -> None:
-    """
-    Plot the rate-scale coverage of the filterbank.
-
-    Args:
-        filterbank: GaborFilterbank instance
-        figsize: Figure size
-    """
-    rates = filterbank.rates
-    scales = filterbank.scales
-
-    fig, ax = plt.subplots(figsize=figsize)
-
-    for r in rates:
-        for s in scales:
-            ax.plot(r, s, "ko", markersize=4)
-
-    ax.axvline(0, color="gray", linestyle="--", alpha=0.5)
-    ax.set_xscale("symlog", linthresh=1)
-    ax.set_yscale("log", base=2)
-
-    ax.set_xlabel("Rate (Hz)")
-    ax.set_ylabel("Scale (cycles/octave)")
-    ax.set_title(f"Gabor Filterbank ({len(rates)} rates × {len(scales)} scales)")
-
-    plt.tight_layout()
     plt.show()
