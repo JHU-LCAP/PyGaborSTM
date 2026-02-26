@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import pygaborstm as stm
 from pygaborstm.gabor import GaborFilterbank
@@ -18,16 +19,14 @@ class TestGaborFilterbank:
         assert model.scales[0] < model.scales[-1]
 
     def test_resolution_presets(self):
-        low = GaborFilterbank(stm.GaborConfig(resolution="low"))
-        high = GaborFilterbank(stm.GaborConfig(resolution="high"))
+        low = GaborFilterbank(stm.Config(resolution="low"))
+        high = GaborFilterbank(stm.Config(resolution="high"))
         assert len(low.rates) < len(high.rates)
         assert len(low.scales) < len(high.scales)
 
     def test_invalid_resolution(self):
-        import pytest
-
         with pytest.raises(ValueError, match="Invalid resolution"):
-            GaborFilterbank(stm.GaborConfig(resolution="ultra_mega"))
+            GaborFilterbank(stm.Config(resolution="ultra_mega"))
 
 
 class TestRSFComputation:
@@ -41,7 +40,7 @@ class TestRSFComputation:
         result = model.compute(spectrogram_from_tone)
         assert result.n_rates == 10
         assert result.n_scales == 6
-        assert result.n_freqs == 128
+        assert result.n_freqs == 128  # default n_filters
         assert result.n_frames > 0
 
     def test_no_nans(self, spectrogram_from_tone):

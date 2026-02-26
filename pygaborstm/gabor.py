@@ -11,11 +11,11 @@ Pipeline:
 """
 
 import numpy as np
-from scipy import signal
 from typing import Tuple
 
-from .config import GaborConfig, SpectrogramConfig
+from .config import Config
 from .structs import Spectrogram, RSF
+from .backend import get_array_module, get_signal_module, to_numpy
 
 
 # Default Gabor parameter options (for adaptive tuning)
@@ -48,24 +48,24 @@ class GaborFilterbank:
         "ultra": (32, 32),  # 2048 filters
     }
 
-    def __init__(
-        self,
-        gabor_config: GaborConfig | None = None,
-        spectrogram_config: SpectrogramConfig | None = None,
-    ):
-        gcfg = gabor_config or GaborConfig()
-        scfg = spectrogram_config or SpectrogramConfig()
+    def __init__(self, config: Config | None = None):
+        cfg = config or Config()
 
-        self.sample_rate = gcfg.sample_rate
-        self.n_freq_bins = gcfg.n_freq_bins
-        self.rsf_frame_size_ms = gcfg.rsf_frame_size_ms
-        self.rsf_frame_shift_ms = gcfg.rsf_frame_shift_ms
+        self.sample_rate = cfg.sample_rate
+        self.n_filters = cfg.n_filters
+        self.rsf_frame_size_ms = cfg.rsf_frame_size_ms
+        self.rsf_frame_shift_ms = cfg.rsf_frame_shift_ms
+        self.use_gpu = cfg.use_gpu
 
-        self.frmlen_ms = scfg.frmlen_ms
-        self.bandwidth_oct = scfg.octaves
+        # Get array and signal modules
+        self.xp = get_array_module(self.use_gpu)
+        self.signal = get_signal_module(self.use_gpu)
+
+        self.frmlen_ms = cfg.frmlen_ms
+        self.bandwidth_oct = cfg.octaves
         self.time_per_frame = self.frmlen_ms / 1000.0
 
-        self.rates, self.scales = self._get_rates_scales(gcfg.resolution)
+        self.rates, self.scales = self._get_rates_scales(cfg.resolution)
 
     def _get_rates_scales(self, resolution: str) -> Tuple[np.ndarray, np.ndarray]:
         """Generate rate and scale arrays based on resolution preset."""
@@ -91,13 +91,13 @@ class GaborFilterbank:
         self,
         omega: float,
         Omega: float,
-        T: np.ndarray,
-        F: np.ndarray,
+        T,
+        F,
         sigma_t_mult: float = 0.5,
         sigma_f_mult: float = 0.5,
         theta: float = 0.0,
         alpha: float = 1.0,
-    ) -> np.ndarray:
+    ):
         """
         Create a 2D Gabor filter.
 
@@ -117,32 +117,34 @@ class GaborFilterbank:
         Returns:
             Complex 2D Gabor filter
         """
+        xp = self.xp
+
         omega_abs = max(abs(omega), 0.5)
 
         sigma_t = sigma_t_mult / omega_abs
         sigma_f = sigma_f_mult / Omega
 
         # Rotated coordinates
-        t1 = T * np.cos(theta) + F * np.sin(theta)
-        f1 = -T * np.sin(theta) + F * np.cos(theta)
+        t1 = T * xp.cos(theta) + F * xp.sin(theta)
+        f1 = -T * xp.sin(theta) + F * xp.cos(theta)
 
         # Gaussian envelope
-        gaussian = (alpha / (2 * np.pi * sigma_t * sigma_f)) * np.exp(
+        gaussian = (alpha / (2 * xp.pi * sigma_t * sigma_f)) * xp.exp(
             -0.5 * (t1**2 / sigma_t**2 + f1**2 / sigma_f**2)
         )
 
         # Complex sinusoidal carrier
-        carrier = np.exp(2j * np.pi * (omega * T + Omega * F))
+        carrier = xp.exp(2j * xp.pi * (omega * T + Omega * F))
 
         return gaussian * carrier
 
     def _apply_gabor_filter(
         self,
-        spec: np.ndarray,
+        spec,
         omega: float,
         Omega: float,
         filter_params: Tuple[float, float, float, float] = (0.5, 0.5, 0.0, 1.0),
-    ) -> np.ndarray:
+    ):
         """
         Apply a single Gabor filter to the spectrogram.
 
@@ -155,21 +157,23 @@ class GaborFilterbank:
         Returns:
             Magnitude of filtered response [time × freq]
         """
+        xp = self.xp
+
         n_time, n_freq = spec.shape
         octaves_per_bin = self.bandwidth_oct / n_freq
 
         # Create coordinate grids
-        t_grid = (np.arange(n_time) - n_time / 2) * self.time_per_frame
-        f_grid = (np.arange(n_freq) - n_freq / 2) * octaves_per_bin
-        T, F = np.meshgrid(t_grid, f_grid, indexing="ij")
+        t_grid = (xp.arange(n_time) - n_time / 2) * self.time_per_frame
+        f_grid = (xp.arange(n_freq) - n_freq / 2) * octaves_per_bin
+        T, F = xp.meshgrid(t_grid, f_grid, indexing="ij")
 
         sigma_t_mult, sigma_f_mult, theta, alpha = filter_params
         gabor_kernel = self._create_gabor_filter(
             omega, Omega, T, F, sigma_t_mult, sigma_f_mult, theta, alpha
         )
 
-        filtered = signal.fftconvolve(spec, gabor_kernel, mode="same")
-        return np.abs(filtered)
+        filtered = self.signal.fftconvolve(spec, gabor_kernel, mode="same")
+        return xp.abs(filtered)
 
     def compute(
         self,
@@ -188,11 +192,13 @@ class GaborFilterbank:
         Returns:
             RSF object with shape [n_frames × n_rates × n_scales × n_freq]
         """
+        xp = self.xp
+
         if isinstance(spectrogram, Spectrogram):
-            spec = spectrogram.data.T  # [time × freq]
+            spec = xp.asarray(spectrogram.data.T)  # [time × freq]
             freqs = spectrogram.freqs
         else:
-            spec = spectrogram.T
+            spec = xp.asarray(spectrogram.T)
             freqs = np.arange(spec.shape[1])
 
         n_time, n_freq = spec.shape
@@ -213,7 +219,7 @@ class GaborFilterbank:
             window_size = n_time
 
         # Output array
-        rsf_data = np.zeros((n_frames, len(self.rates), len(self.scales), n_freq))
+        rsf_data = xp.zeros((n_frames, len(self.rates), len(self.scales), n_freq))
 
         # Apply all filters
         n_scales = len(self.scales)
@@ -229,7 +235,10 @@ class GaborFilterbank:
                 for k in range(n_frames):
                     start = k * frame_shift
                     end = min(start + window_size, n_time)
-                    rsf_data[k, i, j, :] = np.mean(filtered[start:end, :], axis=0)
+                    rsf_data[k, i, j, :] = xp.mean(filtered[start:end, :], axis=0)
+
+        # Transfer back to CPU
+        rsf_data = to_numpy(rsf_data)
 
         # Build time axis for frames
         frame_period = self.rsf_frame_shift_ms / 1000.0
@@ -258,8 +267,3 @@ class GaborFilterbank:
                 PARAM_OPTIONS["alpha"][indices[:, 3]],
             ]
         )
-
-
-def rsf(spectrogram: Spectrogram, config: GaborConfig | None = None) -> RSF:
-    """Functional interface for computing RSF representation."""
-    return GaborFilterbank(config).compute(spectrogram)
