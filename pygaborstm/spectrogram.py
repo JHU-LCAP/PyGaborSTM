@@ -96,7 +96,7 @@ class AuditorySpectrogram:
     def _y1_cochlear_filter(self, audio: np.ndarray):
         """Stage 1: Apply gammatone filterbank."""
         xp = self.xp
-        
+
         audio_device = xp.asarray(audio)
         n_samples = len(audio)
         output = xp.zeros((self.n_filters, n_samples))
@@ -130,7 +130,7 @@ class AuditorySpectrogram:
     def _y5_integration(self, y4):
         """Stage 5: Leaky temporal integration."""
         xp = self.xp
-        
+
         tau_sec = self.tau_ms / 1000.0
         tau_samples = int(tau_sec * self.sample_rate)
         t = xp.arange(tau_samples) / self.sample_rate
@@ -147,7 +147,7 @@ class AuditorySpectrogram:
     def _downsample(self, spectrogram):
         """Downsample to frame rate."""
         xp = self.xp
-        
+
         shft = 0
         L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate * (2**shft))
 

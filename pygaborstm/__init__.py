@@ -6,7 +6,7 @@ Usage:
 
     # Create model
     model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
-    
+
     # Compute
     spec = model.spectrogram(audio)
     rsf = model.rsf(spec)
@@ -34,5 +34,5 @@ __all__ = [
     "RSF",
     # Namespaced modules
     "plot",
-    "structs"
+    "structs",
 ]

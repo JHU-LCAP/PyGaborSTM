@@ -9,10 +9,11 @@ from matplotlib.axes import Axes
 from .structs import Spectrogram, RSF
 
 if TYPE_CHECKING:
-    from .gabor import GaborFilterbank
+    pass
 
 STANDARD_RATES = np.array([-32, -16, -8, -4, -2, 2, 4, 8, 16, 32])
 STANDARD_SCALES = np.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0])
+
 
 def _get_freq_ticks(freqs: np.ndarray):
     """Get frequency tick positions and labels in Hz."""
@@ -252,7 +253,7 @@ def plt_rsf(
     n_scales, n_rates = data.shape
 
     # midpoint between negative (upward) and positive (downward) rates
-    ax.axvline(x=(n_rates - 1) / 2, color='white', linewidth=1, linestyle='-')
+    ax.axvline(x=(n_rates - 1) / 2, color="white", linewidth=1, linestyle="-")
 
     # Map rate values to pixel positions (log-spaced)
     rate_min, rate_max = np.min(np.abs(r_rates)), np.max(np.abs(r_rates))

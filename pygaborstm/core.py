@@ -3,7 +3,7 @@ Core class for PyGaborSTM.
 
 Usage:
     import pygaborstm as stm
-    
+
     model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
     spec = model.spectrogram(audio)
     rsf = model.rsf(spec)
@@ -20,21 +20,21 @@ from .structs import Spectrogram, RSF
 class PyGaborSTM:
     """
     Main interface for spectro-temporal modulation analysis.
-    
+
     Args:
         config: Configuration object (optional, uses defaults if None)
-    
+
     Example:
         >>> model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
         >>> spec = model.spectrogram(audio)
         >>> rsf = model.rsf(spec)
     """
-    
+
     def __init__(self, config: Config | None = None):
         self.config = config or Config()
         self._spec_model = AuditorySpectrogram(self.config)
         self._gabor_model = GaborFilterbank(self.config)
-    
+
     def spectrogram(self, audio: np.ndarray) -> Spectrogram:
         """
         Compute auditory spectrogram from audio.

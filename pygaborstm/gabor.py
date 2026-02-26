@@ -118,7 +118,7 @@ class GaborFilterbank:
             Complex 2D Gabor filter
         """
         xp = self.xp
-        
+
         omega_abs = max(abs(omega), 0.5)
 
         sigma_t = sigma_t_mult / omega_abs
@@ -158,7 +158,7 @@ class GaborFilterbank:
             Magnitude of filtered response [time × freq]
         """
         xp = self.xp
-        
+
         n_time, n_freq = spec.shape
         octaves_per_bin = self.bandwidth_oct / n_freq
 
@@ -193,7 +193,7 @@ class GaborFilterbank:
             RSF object with shape [n_frames × n_rates × n_scales × n_freq]
         """
         xp = self.xp
-        
+
         if isinstance(spectrogram, Spectrogram):
             spec = xp.asarray(spectrogram.data.T)  # [time × freq]
             freqs = spectrogram.freqs

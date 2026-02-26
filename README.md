@@ -5,8 +5,9 @@ PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) represe
 
 <!-- TODO: Publish to PyPI -->
 ```bash
-pip install pygaborstm
+pip install pygaborstm # not published yet
 ```
+For now, install from source (see below).
 
 ### From source
 ```bash
@@ -107,7 +108,11 @@ PyGaborSTM/
 poetry install                      # Install all dependencies
 poetry run jupyter notebook         # Run notebooks
 poetry run pytest -v                # Run tests
+poetry run ruff check --fix .       # lint and fix
+poetry run ruff format .            # format code
 ```
+
+Note: Please lint and format before pushing, as CI will fail otherwise.
 
 ### Jupyter Kernel
 Ensure your notebook uses the correct Poetry environment:
