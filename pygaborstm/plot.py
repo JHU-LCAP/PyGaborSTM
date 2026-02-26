@@ -35,7 +35,7 @@ def plt_spectrogram(
     spectrogram: Spectrogram | np.ndarray,
     title: str = "Auditory Spectrogram",
     figsize: tuple = (12, 6),
-    cmap: str = "turbo",
+    cmap: str = "viridis",
     frmlen_ms: float = 16.0,
     ax: Optional[Axes] = None,
     show_colorbar: bool = True,
@@ -114,7 +114,7 @@ def plt_spectrogram_grid(
     data: List[Dict],
     n_cols: int = 4,
     figsize: tuple | None = None,
-    cmap: str = "turbo",
+    cmap: str = "viridis",
     frmlen_ms: float = 16.0,
     suptitle: str | None = None,
     save_path: Optional[str] = None,
@@ -186,7 +186,7 @@ def plt_rsf(
     fold: bool = False,
     title: str = "Rate-Scale Representation",
     figsize: tuple = (10, 8),
-    cmap: str = "jet",
+    cmap: str = "viridis",
     ax: Optional[Axes] = None,
     show_colorbar: bool = True,
     title_fontsize: int = 12,
@@ -251,6 +251,9 @@ def plt_rsf(
 
     n_scales, n_rates = data.shape
 
+    # midpoint between negative (upward) and positive (downward) rates
+    ax.axvline(x=(n_rates - 1) / 2, color='white', linewidth=1, linestyle='-')
+
     # Map rate values to pixel positions (log-spaced)
     rate_min, rate_max = np.min(np.abs(r_rates)), np.max(np.abs(r_rates))
 
@@ -309,7 +312,7 @@ def plt_rsf_grid(
     fold: bool = False,
     n_cols: int = 6,
     figsize: tuple | None = None,
-    cmap: str = "jet",
+    cmap: str = "viridis",
     suptitle: str | None = None,
     save_path: Optional[str] = None,
 ) -> None:

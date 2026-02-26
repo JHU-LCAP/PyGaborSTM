@@ -7,10 +7,9 @@ numpy (CPU) or cupy (GPU) depending on configuration.
 
 import numpy as np
 
-# Try to import cupy
 try:
     import cupy as cp
-    import cupyx.scipy.signal as cp_signal
+    from cupyx.scipy import signal as cp_signal
     CUPY_AVAILABLE = True
 except ImportError:
     cp = None

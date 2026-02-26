@@ -11,55 +11,112 @@ pip install pygaborstm
 ### From source
 ```bash
 git clone https://github.com/JHU-LCAP/PyGaborSTM.git
-cd pygaborstm
+cd PyGaborSTM
 poetry install
 ```
+
+### GPU Support (Optional, Linux/Windows only)
+For GPU acceleration, you need:
+
+1. **NVIDIA GPU** with CUDA support
+2. **CUDA Toolkit** installed on your system
+
+```bash
+# Check your CUDA version
+nvidia-smi
+```
+
+Download and install the CUDA Toolkit from NVIDIA:
+https://developer.nvidia.com/cuda-toolkit
+
+After installation, add to your `~/.bashrc` or `~/.zshrc`:
+
+```bash
+export PATH=/usr/local/cuda/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+
+Verify installation:
+
+```bash
+nvcc --version
+```
+
+The library uses CuPy for GPU acceleration. Make sure your CuPy version matches your CUDA version:
+- CUDA 11.x → `cupy-cuda11x`
+- CUDA 12.x → `cupy-cuda12x`
+- CUDA 13.x → `cupy-cuda13x`
 
 ## Quick Start
 ```python
 import pygaborstm as stm
 
-# One-liner
-rsf = stm.compute_rsf("audio.wav")
+# Create model (CPU)
+model = stm.PyGaborSTM()
 
-# Step by step
-audio, sr = stm.load("audio.wav")
-spectrogram = stm.auditory_spectrogram(audio)
-rsf = stm.rsf(spectrogram)
+# Create model (GPU)
+model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
+
+# Compute spectrogram and RSF
+spec = model.spectrogram(audio)
+rsf = model.rsf(spec)
 
 # Visualization
-stm.plot_spectrogram(spectrogram)
-stm.plot_rsf(rsf)              # Unfolded
-stm.plot_rsf(rsf, fold=True)   # Symmetric
-
-# Access data
-rs_matrix = rsf.rate_scale_matrix()  # For visualization
-rsf_3d = rsf.mean_over_time()        # For TSVD input
+stm.plot.spectrogram(spec)
+stm.plot.rsf(rsf)
+stm.plot.rsf(rsf, fold=True)  # Symmetric folding
 ```
 
 See `notebooks/example_usage.ipynb` for more examples.
 
+## Configuration
+```python
+config = stm.Config(
+    # General
+    use_gpu=False,          # Enable GPU acceleration
+    sample_rate=16000,      # Audio sample rate
+    
+    # Spectrogram
+    n_filters=128,          # Number of frequency channels
+    f_min=180.0,            # Minimum frequency (Hz)
+    octaves=5.3,            # Frequency range in octaves
+    
+    # RSF / Gabor
+    resolution="low",       # "low", "medium", "high", "ultra"
+)
+```
+
 ## Directory Structure
 ```
-pygaborstm/
+PyGaborSTM/
 ├── pygaborstm/
 │   ├── __init__.py      # Public API
-│   ├── config.py        # SpectrogramConfig, GaborConfig, Config
+│   ├── config.py        # Config dataclass
 │   ├── structs.py       # Spectrogram, RSF dataclasses
 │   ├── spectrogram.py   # AuditorySpectrogram
 │   ├── gabor.py         # GaborFilterbank
-│   ├── core.py          # load(), compute_rsf()
-│   └── plotting.py      # plot_spectrogram(), plot_rsf(), plot_filterbank()
+│   ├── core.py          # PyGaborSTM class
+│   ├── plot.py          # Plotting functions
+│   └── backend.py       # NumPy/CuPy switching
 ├── notebooks/
-│   ├── assets/
-│   └── example_usage.ipynb
 └── tests/
 ```
 
 ## Development
 ```bash
-poetry run jupyter notebook  # Run notebooks
-poetry run pytest -v         # Run tests
+poetry install                      # Install all dependencies
+poetry run jupyter notebook         # Run notebooks
+poetry run pytest -v                # Run tests
+```
+
+### Jupyter Kernel
+Ensure your notebook uses the correct Poetry environment:
+```bash
+# Check Poetry env path
+poetry env info --path
+
+# Register kernel (if needed)
+poetry run python -m ipykernel install --user --name pygaborstm
 ```
 
 ## References
