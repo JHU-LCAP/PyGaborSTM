@@ -14,6 +14,8 @@ Pipeline:
 
 import numpy as np
 
+from scipy.signal import resample_poly
+
 from .config import Config
 from .structs import Spectrogram
 from .backend import get_array_module, get_signal_module, to_numpy
@@ -145,20 +147,19 @@ class AuditorySpectrogram:
         return y5
 
     def _downsample(self, spectrogram):
-        """Downsample to frame rate."""
+        """Downsample to frame rate using polyphase filtering."""
         xp = self.xp
-
-        shft = 0
-        L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate * (2**shft))
-
-        n_samples = spectrogram.shape[1]
-        n_frames = int(xp.ceil(n_samples / L_frm))
-
-        if n_samples < n_frames * L_frm:
-            pad_width = ((0, 0), (0, n_frames * L_frm - n_samples))
-            spectrogram = xp.pad(spectrogram, pad_width, mode="constant")
-
-        return spectrogram[:, L_frm - 1 :: L_frm]
+        
+        # Calculate downsampling factor
+        L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate)
+        
+        # resample_poly(x, up, down) - we want to downsample by L_frm
+        # up=1, down=L_frm gives us 1/L_frm of the original samples
+        spectrogram_np = to_numpy(spectrogram)
+        
+        downsampled = resample_poly(spectrogram_np, up=1, down=L_frm, axis=1)
+        
+        return xp.asarray(downsampled)
 
     def compute(self, audio: np.ndarray) -> Spectrogram:
         """
@@ -180,7 +181,8 @@ class AuditorySpectrogram:
         y3 = self._y3_lateral_inhibition(y2)
         y4 = self._y4_rectification(y3)
         y5 = self._y5_integration(y4)
-        y5 = self.xp.cbrt(y5)
+        y5 = self.xp.cbrt(y5) # causes artifacts in MRF for 32Hz
+        # y5 = self.xp.log1p(self.xp.abs(y5))
         y5 = self._downsample(y5)
 
         # Transfer back to CPU for output

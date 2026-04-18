@@ -19,6 +19,7 @@ Usage:
 from .config import Config
 from .structs import Spectrogram, RSF
 from .core import PyGaborSTM
+from . import analysis
 from . import plot
 from . import structs
 

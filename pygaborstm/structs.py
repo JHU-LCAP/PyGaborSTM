@@ -102,6 +102,19 @@ class RSF:
         """
         return self.data.mean(axis=3)
 
+    def _split_by_direction(self) -> tuple[np.ndarray, np.ndarray]:
+        """Split data into upward (negative) and downward (positive) rates."""
+        mid = self.n_rates // 2
+        return self.data[:, :mid, :, :], self.data[:, mid:, :, :]
+
+    def upward_rates(self) -> np.ndarray:
+        """Get negative (upward) rate values."""
+        return self.rates[: self.n_rates // 2]
+
+    def downward_rates(self) -> np.ndarray:
+        """Get positive (downward) rate values."""
+        return self.rates[self.n_rates // 2 :]
+
     def rate_scale_matrix(self, fold: bool = False) -> np.ndarray:
         """
         Get 2D rate-scale representation (averaged over time and frequency).
@@ -117,35 +130,32 @@ class RSF:
         if not fold:
             return rs
 
-        return self._fold_rates_scales(rs)
+        return self._fold_rates_scales()
 
-    def _fold_rates_scales(self, rs: np.ndarray) -> np.ndarray:
+    def rate_scale_matrix_split(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get separate rate-scale matrices for upward and downward modulation.
+
+        Returns:
+            (upward_rs, downward_rs) each [n_scales, n_rates/2]
+        """
+        up_data, down_data = self._split_by_direction()
+        return up_data.mean(axis=(0, 3)).T, down_data.mean(axis=(0, 3)).T
+
+    def _fold_rates_scales(self) -> np.ndarray:
         """
         Fold RSF by averaging positive and negative rates.
 
         Creates symmetric visualization by averaging responses at
         matching positive/negative rates.
 
-        Args:
-            rs: Rate-scale matrix [n_scales × n_rates]
-
         Returns:
             Folded matrix [n_scales × n_rates] (symmetric)
         """
-        n_rates_half = rs.shape[1] // 2
+        upward_rs, downward_rs = self.rate_scale_matrix_split()
 
-        rs_left = rs[:, :n_rates_half]  # Negative rates
-        rs_right = rs[:, n_rates_half:]  # Positive rates
-
-        # Flip left so magnitudes align
-        rs_left_flipped = np.flip(rs_left, axis=1)
-
-        # Average positive and negative
-        rs_folded = (rs_left_flipped + rs_right) / 2
+        # Flip upward so magnitudes align with downward
+        rs_folded = (np.flip(upward_rs, axis=1) + downward_rs) / 2
 
         # Mirror back for symmetric visualization
-        rs_folded_mirrored = np.concatenate(
-            [np.flip(rs_folded, axis=1), rs_folded], axis=1
-        )
-
-        return rs_folded_mirrored
+        return np.concatenate([np.flip(rs_folded, axis=1), rs_folded], axis=1)
