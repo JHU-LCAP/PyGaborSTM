@@ -15,7 +15,7 @@ from typing import Tuple
 
 from .config import Config
 from .structs import Spectrogram, RSF
-from .backend import get_array_module, get_signal_module, to_numpy
+from .backend import get_array_module, get_signal_module, to_numpy, next_fast_len, get_dtypes, get_available_memory
 
 
 # Default Gabor parameter options (for adaptive tuning)
@@ -59,6 +59,7 @@ class GaborFilterbank:
         # Get array and signal modules
         self.xp = get_array_module(self.use_gpu)
         self.signal = get_signal_module(self.use_gpu)
+        self.float_dtype, self.complex_dtype = get_dtypes()
 
         self.frmlen_ms = cfg.frmlen_ms
         self.bandwidth_oct = cfg.octaves
@@ -144,22 +145,36 @@ class GaborFilterbank:
         # Complex sinusoidal carrier
         carrier = xp.exp(2j * xp.pi * (omega * T + Omega * F))
 
-        return gaussian * carrier
+        return (gaussian * carrier).astype(self.complex_dtype)
 
     def _apply_gabor_filter(
         self,
-        spec,
+        spec_fft,
+        pad_shape,
+        crop_t: int,
+        crop_f: int,
+        n_time: int,
+        n_freq: int,
         omega: float,
         Omega: float,
+        T,
+        F,
         filter_params: Tuple[float, float, float, float] = (0.5, 0.5, 0.0, 1.0),
     ):
         """
-        Apply a single Gabor filter to the spectrogram.
+        Apply a single Gabor filter using precomputed spectrogram FFT.
 
         Args:
-            spec: Spectrogram [time × freq]
+            spec_fft: Precomputed FFT of spectrogram (computed once, reused)
+            pad_shape: Padded FFT dimensions
+            crop_t: Time crop offset for "same" mode
+            crop_f: Frequency crop offset for "same" mode
+            n_time: Original time dimension
+            n_freq: Original frequency dimension
             omega: Temporal modulation rate (Hz)
             Omega: Spectral modulation scale (cycles/octave)
+            T: Precomputed time meshgrid
+            F: Precomputed frequency meshgrid
             filter_params: (sigma_t_mult, sigma_f_mult, theta, alpha)
 
         Returns:
@@ -167,21 +182,166 @@ class GaborFilterbank:
         """
         xp = self.xp
 
-        n_time, n_freq = spec.shape
-        octaves_per_bin = self.bandwidth_oct / n_freq
-
-        # Create coordinate grids
-        t_grid = (xp.arange(n_time) - n_time / 2) * self.time_per_frame
-        f_grid = (xp.arange(n_freq) - n_freq / 2) * octaves_per_bin
-        T, F = xp.meshgrid(t_grid, f_grid, indexing="ij")
-
         sigma_t_mult, sigma_f_mult, theta, alpha = filter_params
         gabor_kernel = self._create_gabor_filter(
             omega, Omega, T, F, sigma_t_mult, sigma_f_mult, theta, alpha
         )
 
-        filtered = self.signal.fftconvolve(spec, gabor_kernel, mode="same")
-        return xp.abs(filtered)
+        kernel_fft = xp.fft.fft2(gabor_kernel, s=pad_shape)
+        filtered_full = xp.fft.ifft2(spec_fft * kernel_fft, s=pad_shape)
+
+        # crop to "same" size and take magnitude
+        filtered = xp.abs(
+            filtered_full[crop_t : crop_t + n_time, crop_f : crop_f + n_freq]
+        )
+        return filtered
+
+    def _prepare_spectrogram(self, spectrogram: Spectrogram):
+        """Parse spectrogram input into array and frequency axis."""
+        xp = self.xp
+
+        if isinstance(spectrogram, Spectrogram):
+            spec = xp.asarray(spectrogram.data.T, dtype=self.float_dtype)
+            freqs = spectrogram.freqs
+        else:
+            spec = xp.asarray(spectrogram.T, dtype=self.float_dtype)
+            freqs = np.arange(spec.shape[1])
+
+        return spec, freqs
+
+    def _compute_frame_params(self, n_time: int) -> Tuple[int, int, int]:
+        """Compute RSF frame windowing parameters."""
+        window_size = int(self.rsf_frame_size_ms / 1000.0 / self.time_per_frame)
+        frame_shift = max(
+            1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame)
+        )
+        n_frames = max(1, (n_time - window_size) // frame_shift + 1)
+
+        if n_frames == 1:
+            window_size = n_time
+
+        return window_size, frame_shift, n_frames
+
+    def _build_meshgrid(self, n_time: int, n_freq: int):
+        """Build time-frequency coordinate grids for Gabor filter construction."""
+        xp = self.xp
+        octaves_per_bin = self.bandwidth_oct / n_freq
+        t_grid = (xp.arange(n_time, dtype=self.float_dtype) - n_time / 2) * self.time_per_frame
+        f_grid = (xp.arange(n_freq, dtype=self.float_dtype) - n_freq / 2) * octaves_per_bin
+        return xp.meshgrid(t_grid, f_grid, indexing="ij")
+
+    def _precompute_spec_fft(self, spec, n_time: int, n_freq: int):
+        """Compute padded FFT of spectrogram for reuse across all filters."""
+        xp = self.xp
+        pad_shape = (
+            next_fast_len(n_time + n_time - 1, self.use_gpu),
+            next_fast_len(n_freq + n_freq - 1, self.use_gpu),
+        )
+        spec_fft = xp.fft.fft2(spec, s=pad_shape)
+        crop_t = (n_time - 1) // 2
+        crop_f = (n_freq - 1) // 2
+        return spec_fft, pad_shape, crop_t, crop_f
+
+    def _build_frame_indices(self, n_frames: int, frame_shift: int,
+                             window_size: int, n_time: int):
+        """Precompute frame integration indices for vectorized windowing."""
+        xp = self.xp
+        starts = xp.arange(n_frames) * frame_shift
+        offsets = xp.arange(window_size)
+        frame_indices = starts[:, None] + offsets[None, :]
+        return xp.clip(frame_indices, 0, n_time - 1)
+
+    def _build_all_kernels(self, T, F, decoded_params):
+        """Build all Gabor kernels and stack into a 3D tensor."""
+        xp = self.xp
+        n_scales = len(self.scales)
+        kernels = []
+
+        for i, omega in enumerate(self.rates):
+            for j, Omega in enumerate(self.scales):
+                filter_idx = i * n_scales + j
+                sigma_t_mult, sigma_f_mult, theta, alpha = decoded_params[filter_idx]
+                kernel = self._create_gabor_filter(
+                    omega, Omega, T, F, sigma_t_mult, sigma_f_mult, theta, alpha
+                )
+                kernels.append(kernel)
+
+        return xp.stack(kernels)  # [n_filters x n_time x n_freq]
+
+    def _auto_batch_size(self, n_filters: int, pad_shape: Tuple[int, int]) -> int:
+        """
+        Calculate batch size based on available memory.
+
+        At peak, each filter in a batch needs ~3 padded FFT arrays
+        (batch_fft, filtered_fft, filtered_full) simultaneously alive.
+        Uses 50% of available memory to leave headroom.
+        """
+        bytes_per_complex = np.dtype(self.complex_dtype).itemsize
+        mem_per_filter = 3 * pad_shape[0] * pad_shape[1] * bytes_per_complex
+        available = get_available_memory(self.use_gpu)
+        batch_size = max(1, int(available * 0.5 / mem_per_filter))
+        return min(batch_size, n_filters)
+
+    def _apply_filters_batched(self, spec_fft, pad_shape, crop_t, crop_f,
+                                n_time, n_freq, kernels, frame_indices,
+                                batch_size: int | None = None):
+        """
+        Apply all Gabor filters using batched tensor operations.
+
+        Processes filters in chunks of batch_size to control memory usage.
+        At low resolution (60 filters), runs in one batch. At higher
+        resolutions, loops over batches while keeping tensor ops inside.
+
+        Args:
+            spec_fft: Precomputed spectrogram FFT [pad_time x pad_freq]
+            pad_shape: Padded FFT dimensions
+            crop_t, crop_f: Crop offsets for "same" mode
+            n_time, n_freq: Original spectrogram dimensions
+            kernels: Stacked Gabor kernels [n_filters x n_time x n_freq]
+            frame_indices: Precomputed frame indices [n_frames x window_size]
+            batch_size: Filters per batch. None = auto (fits to available memory).
+
+        Returns:
+            RSF data [n_frames x n_rates x n_scales x n_freq]
+        """
+        xp = self.xp
+        n_filters = kernels.shape[0]
+        n_frames = frame_indices.shape[0]
+
+        if batch_size is None:
+            batch_size = self._auto_batch_size(n_filters, pad_shape)
+
+        # Accumulate results across batches
+        rsf_flat = xp.zeros((n_filters, n_frames, n_freq))
+
+        for start in range(0, n_filters, batch_size):
+            end = min(start + batch_size, n_filters)
+            batch = kernels[start:end]
+
+            # Batch FFT this chunk of kernels
+            batch_fft = xp.fft.fft2(batch, s=pad_shape, axes=(-2, -1))
+
+            # Broadcast multiply with cached spec_fft
+            filtered_fft = batch_fft * spec_fft[None, :, :]
+
+            # Batch IFFT
+            filtered_full = xp.fft.ifft2(filtered_fft, s=pad_shape, axes=(-2, -1))
+
+            # Crop to "same" size and take magnitude
+            filtered = xp.abs(
+                filtered_full[:, crop_t : crop_t + n_time, crop_f : crop_f + n_freq]
+            )
+
+            # Batch frame integration
+            rsf_flat[start:end] = filtered[:, frame_indices, :].mean(axis=2)
+
+        # Reshape to [n_frames x n_rates x n_scales x n_freq]
+        n_rates = len(self.rates)
+        n_scales = len(self.scales)
+        rsf_data = rsf_flat.reshape(n_rates, n_scales, n_frames, n_freq)
+        rsf_data = rsf_data.transpose(2, 0, 1, 3)
+
+        return rsf_data
 
     def compute(
         self,
@@ -201,53 +361,28 @@ class GaborFilterbank:
             RSF object with shape [n_frames × n_rates × n_scales × n_freq]
         """
         xp = self.xp
-
-        if isinstance(spectrogram, Spectrogram):
-            spec = xp.asarray(spectrogram.data.T)  # [time × freq]
-            freqs = spectrogram.freqs
-        else:
-            spec = xp.asarray(spectrogram.T)
-            freqs = np.arange(spec.shape[1])
-
+        spec, freqs = self._prepare_spectrogram(spectrogram)
         n_time, n_freq = spec.shape
 
-        # Decode filter parameters
         if params is None:
             params = self._get_default_params()
         decoded_params = self._decode_params(params)
 
-        window_size = int(self.rsf_frame_size_ms / 1000.0 / self.time_per_frame)
-        frame_shift = max(
-            1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame)
+        window_size, frame_shift, n_frames = self._compute_frame_params(n_time)
+
+        # Precompute shared data
+        T, F = self._build_meshgrid(n_time, n_freq)
+        spec_fft, pad_shape, crop_t, crop_f = self._precompute_spec_fft(spec, n_time, n_freq)
+        frame_indices = self._build_frame_indices(n_frames, frame_shift, window_size, n_time)
+
+        # Build all kernels, apply as one batched operation
+        kernels = self._build_all_kernels(T, F, decoded_params)
+        rsf_data = self._apply_filters_batched(
+            spec_fft, pad_shape, crop_t, crop_f,
+            n_time, n_freq, kernels, frame_indices
         )
-        n_frames = max(1, (n_time - window_size) // frame_shift + 1)
 
-        if n_frames == 1:
-            window_size = n_time
-
-        # Output array
-        rsf_data = xp.zeros((n_frames, len(self.rates), len(self.scales), n_freq))
-
-        # Apply all filters
-        n_scales = len(self.scales)
-        for i, omega in enumerate(self.rates):
-            for j, Omega in enumerate(self.scales):
-                filter_idx = i * n_scales + j
-                filter_params = tuple(decoded_params[filter_idx])
-
-                # Apply Gabor filter: R(ω, Ω, t, f|Λ)
-                filtered = self._apply_gabor_filter(spec, omega, Omega, filter_params)
-
-                # Integrate over time windows: T(ω, Ω, f|Λ) = ∫R dt
-                for k in range(n_frames):
-                    start = k * frame_shift
-                    end = min(start + window_size, n_time)
-                    rsf_data[k, i, j, :] = xp.mean(filtered[start:end, :], axis=0)
-
-        # Transfer back to CPU
         rsf_data = to_numpy(rsf_data)
-
-        # Build time axis for frames
         frame_period = self.rsf_frame_shift_ms / 1000.0
         times = np.arange(n_frames) * frame_period
 

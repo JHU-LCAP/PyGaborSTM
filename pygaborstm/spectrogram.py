@@ -18,7 +18,7 @@ from scipy.signal import resample_poly
 
 from .config import Config
 from .structs import Spectrogram
-from .backend import get_array_module, get_signal_module, to_numpy
+from .backend import get_array_module, get_signal_module, to_numpy, next_fast_len, get_dtypes
 
 
 class AuditorySpectrogram:
@@ -42,6 +42,7 @@ class AuditorySpectrogram:
         # Get array and signal modules (numpy/cupy)
         self.xp = get_array_module(self.use_gpu)
         self.signal = get_signal_module(self.use_gpu)
+        self.float_dtype, self.complex_dtype = get_dtypes()
 
         self.filter_order = 4
         frame_adjustment = 2 ** (self.filter_order - 1)
@@ -59,6 +60,7 @@ class AuditorySpectrogram:
 
     def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
         """Normalize audio to zero mean and unit max amplitude."""
+        audio = audio.astype(self.float_dtype)
         audio = audio - np.mean(audio)
         audio = audio / (np.max(np.abs(audio)) + 1e-10)
         return audio
@@ -101,7 +103,7 @@ class AuditorySpectrogram:
 
         audio_device = xp.asarray(audio)
         n_samples = len(audio)
-        output = xp.zeros((self.n_filters, n_samples))
+        output = xp.zeros((self.n_filters, n_samples), dtype=self.float_dtype)
 
         for i, sos in enumerate(self._gammatone_sos):
             sos_device = xp.asarray(sos)
@@ -130,7 +132,7 @@ class AuditorySpectrogram:
         return xp.maximum(y3, 0)
 
     def _y5_integration(self, y4):
-        """Stage 5: Leaky temporal integration."""
+        """Stage 5: Leaky temporal integration (batch FFT across all channels)."""
         xp = self.xp
 
         tau_sec = self.tau_ms / 1000.0
@@ -140,9 +142,24 @@ class AuditorySpectrogram:
         kernel = xp.exp(-t / tau_sec)
         kernel = kernel / kernel.sum()
 
-        y5 = xp.zeros_like(y4)
-        for i in range(y4.shape[0]):
-            y5[i, :] = xp.convolve(y4[i, :], kernel, mode="same")
+        n_freq, n_time = y4.shape
+
+        # Padded FFT size for linear convolution
+        n_conv = n_time + tau_samples - 1
+        n_fft = next_fast_len(n_conv, self.use_gpu)
+
+        # FFT all channels at once along time axis
+        Y4_fft = xp.fft.rfft(y4, n=n_fft, axis=1)
+
+        # FFT kernel once, broadcast across all channels
+        K_fft = xp.fft.rfft(kernel, n=n_fft)
+
+        # Multiply and inverse FFT
+        y5_full = xp.fft.irfft(Y4_fft * K_fft[None, :], n=n_fft, axis=1)
+
+        # Crop to match "same" mode
+        pad = (tau_samples - 1) // 2
+        y5 = y5_full[:, pad : pad + n_time]
 
         return y5
 
