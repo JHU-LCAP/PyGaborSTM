@@ -40,6 +40,11 @@ def get_array_module(use_gpu: bool = False):
     return cp if _gpu_available(use_gpu) else np
 
 
+def get_signal_module(use_gpu: bool = False):
+    """Get scipy.signal or cupyx.scipy.signal depending on config."""
+    return cp_signal if _gpu_available(use_gpu) else sp_signal
+
+
 def next_fast_len(n: int, use_gpu: bool = False) -> int:
     """
     Find the next FFT-friendly size.

@@ -18,6 +18,19 @@ from .config import Config
 from .structs import Spectrogram
 from .backend import get_array_module, get_signal_module, to_numpy, next_fast_len, get_dtypes
 
+# Optional GPU fast path for the y1 stage. A single CUDA kernel launch
+# runs all SOS cascades in parallel, replacing the per-channel sosfilt
+# loop. Falls back to the loop when unavailable (CPU mode, no nvrtc,
+# float64 pipeline, etc.).
+try:
+    from .gammatone_kernel import (
+        batched_sosfilt as _batched_sosfilt_impl,
+        is_available as _kernel_is_available,
+    )
+except ImportError:
+    _batched_sosfilt_impl = None
+    _kernel_is_available = lambda: False
+
 
 class AuditorySpectrogram:
     """
@@ -52,6 +65,7 @@ class AuditorySpectrogram:
         self._L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate)
         self._init_gammatone_filters()
         self._init_y5_kernel()
+        self._init_y1_fast_path()
 
         # Lazy cache (input-length dependent, rebuilt on shape change)
         self._cached_n_samples = None
@@ -117,6 +131,25 @@ class AuditorySpectrogram:
         kernel = kernel / kernel.sum()
         self._y5_kernel_host = kernel.astype(self.float_dtype)
 
+    def _init_y1_fast_path(self) -> None:
+        """Resolve the GPU batched-SOS kernel for the y1 stage, if available.
+
+        Pre-converts the SOS bank to float32 once. The kernel runs the
+        biquad recurrence in float32 (~8x faster than float64 on consumer
+        Ampere, where FP64 throughput is throttled to 1/64 of FP32). The
+        kernel currently only handles float32 audio, so we gate on that.
+        """
+        self._batched_sosfilt = None
+        self._sos_device_f32 = None
+        if (
+            self.use_gpu
+            and _batched_sosfilt_impl is not None
+            and _kernel_is_available()
+            and self.float_dtype == np.float32
+        ):
+            self._batched_sosfilt = _batched_sosfilt_impl
+            self._sos_device_f32 = self._sos_device.astype(np.float32)
+
     # ----- lazy cache (rebuilt on input length change) -----------------------
 
     def _ensure_cache(self, n_samples: int) -> None:
@@ -137,16 +170,25 @@ class AuditorySpectrogram:
 
     # ----- pipeline stages ---------------------------------------------------
 
-    def _y1_cochlear_filter(self, audio) -> None:
-        """Stage 1: Gammatone filterbank using cached SOS coefficients."""
+    def _y1_cochlear_filter(self, audio):
+        """Stage 1: Gammatone filterbank using cached SOS coefficients.
+
+        GPU fast path: single batched-SOS kernel launch, float32 internal.
+        Fallback: per-channel scipy/cupyx sosfilt loop at self.float_dtype.
+        """
         xp = self.xp
         audio_device = xp.asarray(audio, dtype=self.float_dtype)
-        n_samples = len(audio)
-        output = xp.zeros((self.n_filters, n_samples), dtype=self.float_dtype)
 
+        if self._batched_sosfilt is not None:
+            return self._batched_sosfilt(
+                self._sos_device_f32, audio_device,
+                gain=2.0, precision="float32",
+            )
+
+        n_samples = audio_device.shape[0]
+        output = xp.empty((self.n_filters, n_samples), dtype=self.float_dtype)
         for i in range(self.n_filters):
             output[i, :] = 2.0 * self.signal.sosfilt(self._sos_device[i], audio_device)
-
         return output
 
     def _y2_transduction(self, y1):
