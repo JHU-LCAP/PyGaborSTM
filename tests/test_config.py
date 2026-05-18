@@ -16,6 +16,10 @@ class TestConfig:
         assert cfg.tau_ms == 8.0
         assert cfg.frmlen_ms == 16.0
 
+        # Gammatone
+        assert cfg.filter_order == 4
+        assert cfg.erb_scale == 0.6
+
         # RSF / Gabor
         assert cfg.resolution == "low"
         assert cfg.rsf_frame_size_ms == 500

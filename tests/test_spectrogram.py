@@ -86,6 +86,32 @@ class TestAuditorySpectrogram:
         assert result.ndim == 2  # (n_time, n_freq)
 
 
+class TestGammatoneConfig:
+    """Gammatone-specific config knobs flow into the SOS bank."""
+
+    def test_filter_order_changes_sos_sections(self):
+        default = AuditorySpectrogram()
+        custom = AuditorySpectrogram(stm.Config(filter_order=8))
+        # SOS bank shape is (n_filters, filter_order, 6).
+        assert default._sos_device.shape[1] == 4
+        assert custom._sos_device.shape[1] == 8
+
+    def test_erb_scale_changes_filter_bandwidth(self, audio_tone):
+        """Narrower ERB scale → narrower filters → more spectral concentration on a pure tone."""
+        wide = AuditorySpectrogram(stm.Config(erb_scale=1.0))
+        narrow = AuditorySpectrogram(stm.Config(erb_scale=0.3))
+
+        wide_spec = wide.compute(audio_tone).data
+        narrow_spec = narrow.compute(audio_tone).data
+
+        # For a pure tone, narrower filters concentrate energy in fewer
+        # channels. Count channels with above-threshold energy.
+        threshold = 0.1 * wide_spec.max()
+        wide_active = (wide_spec.mean(axis=1) > threshold).sum()
+        narrow_active = (narrow_spec.mean(axis=1) > threshold).sum()
+        assert narrow_active < wide_active
+
+
 class TestLazyCache:
     """The y5 FFT cache is keyed on input length and rebuilt on length change."""
 

@@ -85,7 +85,8 @@ class AuditorySpectrogram:
         self.signal = get_signal_module(self.use_gpu)
         self.float_dtype, self.complex_dtype = get_dtypes()
 
-        self.filter_order = 4
+        self.filter_order = cfg.filter_order
+        self.erb_scale = cfg.erb_scale
         frame_adjustment = 2 ** (self.filter_order - 1)
         self.alph = np.exp(-1 / (self.tau_ms * frame_adjustment))
 
@@ -120,10 +121,9 @@ class AuditorySpectrogram:
     def _init_gammatone_filters(self) -> None:
         """Build SOS coefficients and stack on device (no per-call transfer)."""
         xp = self.xp
-        erb_scale = 0.6
         T = 1.0 / self.sample_rate
 
-        ERB = 24.7 * (4.37 * self.center_freqs / 1000.0 + 1.0) * erb_scale
+        ERB = 24.7 * (4.37 * self.center_freqs / 1000.0 + 1.0) * self.erb_scale
         B = 1.019 * 2 * np.pi * ERB
 
         sos_list = []
