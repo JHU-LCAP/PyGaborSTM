@@ -38,3 +38,8 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["E402"]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: requires CUDA GPU (skipped in CPU-only CI; run locally with pytest -m gpu)",
+]
