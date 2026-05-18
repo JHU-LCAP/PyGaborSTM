@@ -63,9 +63,9 @@ spec = model.spectrogram(audio)
 rsf = model.rsf(spec)
 
 # Visualization
-stm.plot.spectrogram(spec)
-stm.plot.rsf(rsf)
-stm.plot.rsf(rsf, fold=True)  # Symmetric folding
+stm.plot.plt_spectrogram(spec)
+stm.plot.plt_rsf(rsf)
+stm.plot.plt_rsf(rsf, fold=True)  # Symmetric folding
 ```
 
 See `notebooks/example_usage.ipynb` for more examples.
@@ -83,7 +83,7 @@ config = stm.Config(
     octaves=5.3,            # Frequency range in octaves
     
     # RSF / Gabor
-    resolution="low",       # "low", "medium", "high", "ultra"
+    resolution="low",       # "low", "medium", "high", "ultra", "max", "overkill"
 )
 ```
 
@@ -98,7 +98,9 @@ PyGaborSTM/
 │   ├── gabor.py         # GaborFilterbank
 │   ├── core.py          # PyGaborSTM class
 │   ├── plot.py          # Plotting functions
-│   └── backend.py       # NumPy/CuPy switching
+│   ├── analysis.py      # MTF analysis helpers
+│   ├── backend.py       # NumPy/CuPy switching
+│   └── gammatone_kernel.py  # Custom CUDA SOS kernel
 ├── notebooks/
 └── tests/
 ```
@@ -107,7 +109,7 @@ PyGaborSTM/
 ```bash
 poetry install                      # Install all dependencies
 poetry run jupyter notebook         # Run notebooks
-pytest -m "not gpu"                 # Run all tests exluding GPU kernel tests (used in CI/CD)
+poetry run pytest -m "not gpu"      # Run all tests excluding GPU kernel tests (used in CI/CD)
 poetry run pytest -v                # Run all tests including GPU kernel tests
 poetry run ruff check --fix .       # lint and fix
 poetry run ruff format .            # format code

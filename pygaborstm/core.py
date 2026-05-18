@@ -1,20 +1,7 @@
-"""
-Core class for PyGaborSTM.
+"""High-level user-facing class for PyGaborSTM.
 
-Usage:
-    import pygaborstm as stm
-
-    model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
-
-    # Individual stages (returns dataclasses on host)
-    spec = model.spectrogram(audio)
-    rsf = model.rsf(spec)
-
-    # Full pipeline on device (no intermediate host transfers)
-    rsf = model.compute(audio)
-
-    # Device-only hot path (stays on GPU, no host transfer)
-    rsf_device = model.compute_device(audio)
+Wraps :class:`AuditorySpectrogram` and :class:`GaborFilterbank` behind a
+single object so users don't have to manage the two stages by hand.
 """
 
 import numpy as np
@@ -27,18 +14,33 @@ from .backend import to_numpy
 
 
 class PyGaborSTM:
-    """
-    Main interface for spectro-temporal modulation analysis.
+    """Main interface for spectro-temporal modulation analysis.
 
-    Args:
-        config: Configuration object (optional, uses defaults if None)
+    Holds an :class:`AuditorySpectrogram` and a :class:`GaborFilterbank`
+    configured from the same :class:`Config`, and exposes both per-stage
+    methods (:meth:`spectrogram`, :meth:`rsf`) and full-pipeline
+    convenience methods (:meth:`compute`, :meth:`compute_device`).
 
-    Example:
-        >>> model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
-        >>> spec = model.spectrogram(audio)
-        >>> rsf = model.rsf(spec)
-        >>> # or, full pipeline with no intermediate host transfers:
-        >>> rsf = model.compute(audio)
+    Parameters
+    ----------
+    config : Config, optional
+        Configuration object. If ``None``, uses defaults.
+
+    Attributes
+    ----------
+    config : Config
+        The configuration used to build both internal stages.
+
+    Examples
+    --------
+    >>> import pygaborstm as stm
+    >>> model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
+    >>> spec = model.spectrogram(audio)
+    >>> rsf = model.rsf(spec)
+
+    Or chained without an intermediate host transfer:
+
+    >>> rsf = model.compute(audio)
     """
 
     def __init__(self, config: Config | None = None):
@@ -47,26 +49,33 @@ class PyGaborSTM:
         self._gabor_model = GaborFilterbank(self.config)
 
     def spectrogram(self, audio: np.ndarray) -> Spectrogram:
-        """
-        Compute auditory spectrogram from audio.
+        """Compute the auditory spectrogram and return it on host.
 
-        Args:
-            audio: Audio signal (1D numpy array)
+        Parameters
+        ----------
+        audio : np.ndarray
+            1D audio signal.
 
-        Returns:
-            Spectrogram object (data on host)
+        Returns
+        -------
+        Spectrogram
+            Spectrogram with data and axis metadata on the host.
         """
         return self._spec_model.compute(audio)
 
     def rsf(self, spec: Spectrogram) -> RSF:
-        """
-        Compute RSF representation from spectrogram.
+        """Compute the RSF representation from a spectrogram, on host.
 
-        Args:
-            spec: Auditory spectrogram
+        Parameters
+        ----------
+        spec : Spectrogram
+            Auditory spectrogram, typically produced by
+            :meth:`spectrogram`.
 
-        Returns:
-            RSF object (data on host)
+        Returns
+        -------
+        RSF
+            RSF representation with data and axis metadata on the host.
         """
         return self._gabor_model.compute(spec)
 
@@ -77,34 +86,43 @@ class PyGaborSTM:
     # from a prior device kernel. Batch throughput is unaffected. Investigate
     # with nsys if it ever matters.
     def compute_device(self, audio: np.ndarray):
-        """
-        Full pipeline on device. No intermediate host transfers.
+        """Run the full pipeline on device with no intermediate host transfer.
 
-        Spectrogram output stays on device and feeds directly into the
-        Gabor stage. Only use this when you don't need the intermediate
-        Spectrogram dataclass.
+        Spectrogram output stays on the device and feeds directly into
+        the Gabor stage. Use this when you do not need the intermediate
+        :class:`Spectrogram` dataclass.
 
-        Args:
-            audio: Audio signal (1D numpy array)
+        Parameters
+        ----------
+        audio : np.ndarray
+            1D audio signal.
 
-        Returns:
-            Device array (numpy or cupy) of shape (n_frames, n_rates, n_scales, n_freq)
+        Returns
+        -------
+        np.ndarray or cupy.ndarray
+            RSF tensor of shape
+            ``(n_frames, n_rates, n_scales, n_freq)`` on the active
+            backend.
         """
         spec_device = self._spec_model.compute_device(audio)
         return self._gabor_model.compute_device(spec_device)
 
     def compute(self, audio: np.ndarray) -> RSF:
-        """
-        Full pipeline: audio → spectrogram → RSF.
+        """Run the full pipeline and return an RSF dataclass on host.
 
         Chains both stages on device with no intermediate host transfer,
-        then copies the final result to host and wraps in an RSF dataclass.
+        then copies the final result to host and wraps it in an
+        :class:`RSF`.
 
-        Args:
-            audio: Audio signal (1D numpy array)
+        Parameters
+        ----------
+        audio : np.ndarray
+            1D audio signal.
 
-        Returns:
-            RSF object (data on host)
+        Returns
+        -------
+        RSF
+            Host-side RSF with data and axis metadata.
         """
         rsf_device = self.compute_device(audio)
         rsf_data = to_numpy(rsf_device)

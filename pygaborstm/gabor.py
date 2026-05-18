@@ -30,7 +30,6 @@ from .backend import (
 )
 
 
-# Default Gabor parameter options (for adaptive tuning)
 PARAM_OPTIONS = {
     "sigma_t": np.array(
         [1 / 1.4, 1 / 1.6, 1 / 1.8, 1 / 2.0, 1 / 2.2, 1 / 2.4, 1 / 2.6]
@@ -41,15 +40,59 @@ PARAM_OPTIONS = {
     "theta": np.radians(np.array([-4.5, -3.0, -1.5, 0.0, 1.5, 3.0, 4.5])),
     "alpha": np.array([0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]),
 }
+"""Per-kernel Gabor parameter options for adaptive (GA) tuning.
+
+Each entry is a discrete grid of candidate values. A genetic algorithm
+or other tuner emits a 4-column integer array indexing into these
+grids, which :meth:`GaborFilterbank.compute` decodes per kernel.
+"""
+
 DEFAULT_PARAM_IDX = 3
+"""Index into each :data:`PARAM_OPTIONS` grid that selects the canonical
+(untuned) Gabor parameters used by the default cached path."""
 
 
 class GaborFilterbank:
-    """
-    2D Gabor filterbank for spectro-temporal modulation analysis.
+    """2D Gabor filterbank for spectro-temporal modulation analysis.
 
-    Filters are tuned to different rates (temporal modulation, Hz) and
-    scales (spectral modulation, cycles/octave).
+    Each filter is tuned to a ``(rate, scale)`` pair, where ``rate`` is
+    the temporal modulation in Hz and ``scale`` is the spectral
+    modulation in cycles/octave.
+
+    Dispatch is memory-adaptive. If the full kernel-FFT cache fits in
+    the available memory budget (see :data:`_CACHE_MEMORY_BUDGET`), the
+    cached batched path is used. Otherwise the filterbank emits a
+    :class:`ResourceWarning` and falls back to a streaming path that
+    rebuilds and FFTs kernels per chunk — slower per call, but works at
+    arbitrary resolution and on low-memory devices.
+
+    Parameters
+    ----------
+    config : Config, optional
+        Configuration object. If ``None``, uses defaults.
+
+    Attributes
+    ----------
+    rates : np.ndarray
+        Temporal modulation rates in Hz, length ``n_rates``.
+    scales : np.ndarray
+        Spectral modulation scales in cycles/octave, length ``n_scales``.
+    use_gpu : bool
+        Whether GPU acceleration is active.
+
+    Raises
+    ------
+    ValueError
+        If ``config.resolution`` is not one of the keys in
+        :data:`RESOLUTION_MULTIPLIERS`.
+
+    Warns
+    -----
+    ResourceWarning
+        At construction time if the chosen resolution produces more
+        than :data:`_KERNEL_COUNT_WARN_THRESHOLD` kernels (compute time
+        scales linearly with the kernel count regardless of memory
+        mode).
     """
 
     RESOLUTION_MULTIPLIERS = {
@@ -420,22 +463,32 @@ class GaborFilterbank:
     # ----- public API --------------------------------------------------------
 
     def compute_device(self, spec_device, params: np.ndarray | None = None):
-        """
-        Hot path. Process spectrogram on device, return RSF on device.
+        """Process a device-resident spectrogram and return RSF on device.
 
-        Memory-adaptive dispatch:
-          - Default mode (params=None): try to cache kernel FFTs. If they
-            fit, use the batched cached path. If not, fall back to streaming.
-          - GA mode (params given): always stream. Kernels change per call,
-            so caching has no benefit, and this avoids GA's own OOM risk at
-            high resolution.
+        Hot path. Memory-adaptive dispatch:
 
-        Args:
-            spec_device: Device array (numpy or cupy) of shape (n_time, n_freq)
-            params: Optional filter parameter indices [n_filters x 4].
+        - Default mode (``params is None``): try to cache kernel FFTs.
+          If they fit, use the batched cached path. If not, fall back
+          to streaming.
+        - GA mode (``params`` given): always stream. Kernels change per
+          call, so caching has no benefit, and this avoids GA's own
+          OOM risk at high resolution.
 
-        Returns:
-            Device array of shape (n_frames, n_rates, n_scales, n_freq)
+        Parameters
+        ----------
+        spec_device : np.ndarray or cupy.ndarray
+            Spectrogram of shape ``(n_time, n_freq)`` already on the
+            active backend.
+        params : np.ndarray, optional
+            Per-kernel parameter indices of shape ``(n_kernels, 4)``,
+            decoded via :data:`PARAM_OPTIONS`. If omitted, the default
+            (untuned) Gabor parameters are used.
+
+        Returns
+        -------
+        np.ndarray or cupy.ndarray
+            RSF tensor of shape ``(n_frames, n_rates, n_scales, n_freq)``
+            on the active backend.
         """
         xp = self.xp
         n_time, n_freq = spec_device.shape
@@ -459,15 +512,27 @@ class GaborFilterbank:
         spectrogram: Spectrogram,
         params: np.ndarray | None = None,
     ) -> RSF:
-        """
-        Compute RSF representation from spectrogram. Returns RSF dataclass on host.
+        """Compute the RSF representation from a spectrogram, returning a host dataclass.
 
-        Args:
-            spectrogram: Auditory spectrogram (Spectrogram object or array)
-            params: Optional filter parameter indices [n_filters x 4]
+        Wraps :meth:`compute_device` with the necessary input transfer
+        and a host copy of the result.
 
-        Returns:
-            RSF object with shape [n_frames x n_rates x n_scales x n_freq]
+        Parameters
+        ----------
+        spectrogram : Spectrogram or np.ndarray
+            Auditory spectrogram. If a raw 2D array is passed, it is
+            assumed to be in ``(n_freq, n_time)`` orientation and the
+            frequency axis is filled with placeholder integer indices.
+        params : np.ndarray, optional
+            Per-kernel parameter indices of shape ``(n_kernels, 4)``.
+            See :meth:`compute_device`.
+
+        Returns
+        -------
+        RSF
+            Host-side RSF with ``data`` shape
+            ``(n_frames, n_rates, n_scales, n_freq)`` and time, rate,
+            scale, and frequency axes.
         """
         xp = self.xp
 

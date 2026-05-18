@@ -1,19 +1,30 @@
-"""
-PyGaborSTM: Spectro-temporal modulation analysis library.
+"""PyGaborSTM: spectro-temporal modulation analysis.
 
-Usage:
-    import pygaborstm as stm
+Extracts Rate-Scale-Frequency (RSF) representations from audio via a
+bio-inspired auditory spectrogram followed by a 2D Gabor filterbank,
+following Chi, Ru & Shamma (2005) and Bellur & Elhilali (2017).
 
-    # Create model
-    model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
+Public API
+----------
+PyGaborSTM
+    Main user-facing class. Use :meth:`PyGaborSTM.compute` for the full
+    pipeline, or :meth:`PyGaborSTM.spectrogram` and
+    :meth:`PyGaborSTM.rsf` for the individual stages.
+Config
+    Configuration dataclass for all pipeline parameters.
+Spectrogram, RSF
+    Output dataclasses returned by the corresponding stages.
+plot, analysis, structs
+    Namespaced submodules.
 
-    # Compute
-    spec = model.spectrogram(audio)
-    rsf = model.rsf(spec)
-
-    # Plot
-    stm.plot.spectrogram(spec)
-    stm.plot.rsf(rsf)
+Examples
+--------
+>>> import pygaborstm as stm
+>>> model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
+>>> spec = model.spectrogram(audio)
+>>> rsf = model.rsf(spec)
+>>> stm.plot.spectrogram(spec)
+>>> stm.plot.rsf(rsf)
 """
 
 from .config import Config

@@ -1,3 +1,10 @@
+"""Plotting helpers for :class:`Spectrogram` and :class:`RSF` outputs.
+
+Thin wrappers around :mod:`matplotlib` that handle the per-axis
+formatting (log-spaced frequency/rate/scale ticks, the upward/downward
+rate split, etc.) so notebook code can stay short.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional, List, Dict
@@ -42,24 +49,38 @@ def plt_spectrogram(
     tick_fontsize: int = 9,
     interpolation: str = "bilinear",
 ) -> Axes:
-    """
-    Plot a single auditory spectrogram.
+    """Plot a single auditory spectrogram.
 
-    Args:
-        spectrogram: Spectrogram object or array [n_freq × n_time]
-        title: Plot title
-        figsize: Figure size (only used if ax is None)
-        cmap: Colormap
-        frmlen_ms: Frame length in ms (used if array provided)
-        ax: Optional axes to plot on
-        show_colorbar: Show colorbar
-        title_fontsize: Title font size
-        label_fontsize: Axis label font size
-        tick_fontsize: Tick label font size
-        interpolation: Interpolation method to smooth out spec plot
+    Parameters
+    ----------
+    spectrogram : Spectrogram or np.ndarray
+        Spectrogram dataclass or a raw ``(n_freq, n_time)`` array.
+    title : str, default "Auditory Spectrogram"
+        Plot title.
+    figsize : tuple, default (12, 6)
+        Figure size. Only used when ``ax`` is None.
+    cmap : str, default "viridis"
+        Matplotlib colormap.
+    frmlen_ms : float, default 16.0
+        Frame length in ms, used to compute the time axis when a raw
+        array is passed.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on. If None, a new figure is created and shown.
+    show_colorbar : bool, default True
+        Add a colorbar (only when ``ax`` is None).
+    title_fontsize : int, default 12
+        Title font size.
+    label_fontsize : int, default 10
+        Axis label font size.
+    tick_fontsize : int, default 9
+        Tick label font size.
+    interpolation : str, default "bilinear"
+        Interpolation passed to :func:`matplotlib.axes.Axes.imshow`.
 
-    Returns:
-        Axes object
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes the spectrogram was drawn on.
     """
     # Create figure if no ax provided
     if ax is None:
@@ -119,17 +140,27 @@ def plt_spectrogram_grid(
     suptitle: str | None = None,
     save_path: Optional[str] = None,
 ) -> None:
-    """
-    Plot multiple spectrograms in a grid layout.
+    """Plot multiple spectrograms in a grid.
 
-    Args:
-        data: List of dicts with "spectrogram" and "title" keys
-        n_cols: Number of columns in grid
-        figsize: Figure size (auto-calculated if None)
-        cmap: Colormap
-        frmlen_ms: Frame length in ms (used if arrays provided)
-        suptitle: Overall figure title
-        save_path: Optional path to save figure
+    Parameters
+    ----------
+    data : list of dict
+        Each entry must have a ``"spectrogram"`` key (a
+        :class:`Spectrogram` or raw array) and may have a ``"title"``
+        key.
+    n_cols : int, default 4
+        Number of columns in the grid.
+    figsize : tuple, optional
+        Figure size. Auto-calculated from ``n_cols`` and the number of
+        rows if not given.
+    cmap : str, default "viridis"
+        Matplotlib colormap.
+    frmlen_ms : float, default 16.0
+        Frame length in ms, used when raw arrays are passed.
+    suptitle : str, optional
+        Overall figure title.
+    save_path : str, optional
+        If given, save the figure to this path at 200 DPI before showing.
     """
     n_plots = len(data)
     if n_plots == 0:
@@ -197,26 +228,51 @@ def plt_rsf(
     tick_fontsize: int = 9,
     square: bool = False,
 ) -> Axes:
-    """
-    Plot a single RSF representation.
+    """Plot a single RSF representation as a 2D scale-by-rate heatmap.
 
-    Args:
-        rsf: RSF object or array
-        rates: Rate values (uses RSF.rates if None)
-        scales: Scale values (uses RSF.scales if None)
-        fold: If True, fold positive/negative rates
-        title: Plot title
-        figsize: Figure size (only used if ax is None)
-        cmap: Colormap
-        ax: Optional axes to plot on
-        show_colorbar: Show colorbar
-        title_fontsize: Title font size
-        label_fontsize: Axis label font size
-        tick_fontsize: Tick label font size
-        square: Force square axes box
+    Parameters
+    ----------
+    rsf : RSF or np.ndarray
+        RSF dataclass, or a raw 4D array of shape
+        ``(n_frames, n_rates, n_scales, n_freq)`` (in which case
+        ``rates`` and ``scales`` must be supplied).
+    rates : np.ndarray, optional
+        Rate axis values for tick labels. Defaults to ``rsf.rates``
+        when ``rsf`` is an :class:`RSF`.
+    scales : np.ndarray, optional
+        Scale axis values for tick labels. Defaults to ``rsf.scales``
+        when ``rsf`` is an :class:`RSF`.
+    fold : bool, default False
+        If True, average the upward and downward halves and mirror the
+        result back out to produce a symmetric plot.
+    title : str, default "Rate-Scale Representation"
+        Plot title.
+    figsize : tuple, default (10, 8)
+        Figure size. Only used when ``ax`` is None.
+    cmap : str, default "viridis"
+        Matplotlib colormap.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on. If None, a new figure is created and shown.
+    show_colorbar : bool, default True
+        Add a colorbar (only when ``ax`` is None).
+    title_fontsize : int, default 12
+        Title font size.
+    label_fontsize : int, default 10
+        Axis label font size.
+    tick_fontsize : int, default 9
+        Tick label font size.
+    square : bool, default False
+        Force a square aspect ratio on the axes.
 
-    Returns:
-        Axes object
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes the RSF was drawn on.
+
+    Raises
+    ------
+    ValueError
+        If ``rsf`` is a raw array but ``rates`` or ``scales`` is None.
     """
     # Extract data and rates/scales
     if isinstance(rsf, RSF):
@@ -327,19 +383,36 @@ def plt_rsf_grid(
     suptitle: str | None = None,
     save_path: Optional[str] = None,
 ) -> None:
-    """
-    Plot multiple RSF representations in a grid layout.
+    """Plot multiple RSF representations in a grid.
 
-    Args:
-        data: List of dicts with "rsf" and "title" keys
-        rates: Rate values for tick labels (uses RSF.rates from first item if None)
-        scales: Scale values for tick labels (uses RSF.scales from first item if None)
-        fold: If True, fold positive/negative rates
-        n_cols: Number of columns in grid
-        figsize: Figure size (auto-calculated if None)
-        cmap: Colormap
-        suptitle: Overall figure title
-        save_path: Optional path to save figure
+    Parameters
+    ----------
+    data : list of dict
+        Each entry must have an ``"rsf"`` key (an :class:`RSF` or raw
+        4D array) and may have a ``"title"`` key.
+    rates : np.ndarray, optional
+        Rate axis values. Defaults to ``rates`` from the first
+        :class:`RSF` in ``data``.
+    scales : np.ndarray, optional
+        Scale axis values. Defaults to ``scales`` from the first
+        :class:`RSF` in ``data``.
+    fold : bool, default False
+        Forwarded to :func:`plt_rsf` for each subplot.
+    n_cols : int, default 6
+        Number of columns in the grid.
+    figsize : tuple, optional
+        Figure size. Auto-calculated if not given.
+    cmap : str, default "viridis"
+        Matplotlib colormap.
+    suptitle : str, optional
+        Overall figure title.
+    save_path : str, optional
+        If given, save the figure to this path at 200 DPI before showing.
+
+    Raises
+    ------
+    ValueError
+        If raw RSF arrays are passed but ``rates`` or ``scales`` is None.
     """
     n_plots = len(data)
     if n_plots == 0:

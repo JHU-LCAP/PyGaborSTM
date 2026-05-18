@@ -100,11 +100,21 @@ _DTYPE_MAP = {
 
 
 def is_available() -> bool:
-    """True iff CuPy + nvrtc can compile the kernel on this machine."""
+    """Return True iff CuPy + nvrtc can compile this kernel on this machine.
+
+    Triggers a one-time JIT compile of a tiny stub kernel; subsequent
+    calls hit the kernel cache and are essentially free.
+
+    Returns
+    -------
+    bool
+        True if the kernel can be used. False on CPU-only systems or
+        when nvrtc is missing.
+    """
     if not _HAS_CUPY:
         return False
     try:
-        _get_kernel(1, "float32")  # was: _get_kernel(1) — missing precision arg
+        _get_kernel(1, "float32")
         return True
     except Exception as e:
         logger.warning("batched_sosfilt kernel unavailable: %s", e)
@@ -134,11 +144,47 @@ def batched_sosfilt(
     out: Optional["cp.ndarray"] = None,
     precision: str = "float64",
 ) -> "cp.ndarray":
-    """
-    precision : {"float64", "float32"}
-        Internal compute precision. "float32" is ~8× faster on consumer
-        Ampere (3090ti, Jetson Orin) where FP64 throughput is 1/64 of FP32.
-        sos.dtype must match (float64 for "float64", float32 for "float32").
+    """Apply a per-channel SOS cascade to the same input in one kernel launch.
+
+    Equivalent to a loop of ``cupyx.scipy.signal.sosfilt`` calls, each
+    with its own SOS coefficients but a shared input signal, fused into
+    a single CUDA kernel.
+
+    Parameters
+    ----------
+    sos : cupy.ndarray
+        SOS coefficients of shape ``(n_channels, n_sections, 6)``.
+        Dtype must match ``precision`` (float64 for ``"float64"``,
+        float32 for ``"float32"``).
+    x : cupy.ndarray
+        Shared 1D input signal of shape ``(n_samples,)``. Must be
+        float32.
+    gain : float, default 1.0
+        Per-channel scalar applied to the output before write-back.
+    out : cupy.ndarray, optional
+        Pre-allocated output buffer of shape ``(n_channels, n_samples)``
+        and dtype float32. Allocated by the caller when reused across
+        many invocations to avoid per-call allocation.
+    precision : {"float64", "float32"}, default "float64"
+        Internal compute precision. ``"float32"`` is ~8x faster on
+        consumer Ampere (3090ti, Jetson Orin) where FP64 throughput is
+        throttled to 1/64 of FP32. The float32 path matches scipy to
+        ~1e-3 worst-case relative error; the float64 path to ~1e-9.
+
+    Returns
+    -------
+    cupy.ndarray
+        Filtered output of shape ``(n_channels, n_samples)``, dtype
+        float32. If ``out`` was provided, returns that same buffer.
+
+    Raises
+    ------
+    RuntimeError
+        If CuPy is not installed.
+    ValueError
+        If ``precision`` is not one of the supported values.
+    TypeError
+        If ``sos`` or ``x`` does not match the expected dtype.
     """
     if not _HAS_CUPY:
         raise RuntimeError("CuPy is not available")
