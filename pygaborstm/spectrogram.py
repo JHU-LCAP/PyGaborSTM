@@ -16,14 +16,58 @@ import numpy as np
 
 from .config import Config
 from .structs import Spectrogram
-from .backend import get_array_module, get_signal_module, to_numpy
+from .backend import (
+    get_array_module,
+    get_signal_module,
+    to_numpy,
+    next_fast_len,
+    get_dtypes,
+)
+
+# Optional GPU fast path for the y1 stage. A single CUDA kernel launch
+# runs all SOS cascades in parallel, replacing the per-channel sosfilt
+# loop. Falls back to the loop when unavailable (CPU mode, no nvrtc,
+# float64 pipeline, etc.).
+try:
+    from .gammatone_kernel import (
+        batched_sosfilt as _batched_sosfilt_impl,
+        is_available as _kernel_is_available,
+    )
+except ImportError:
+    _batched_sosfilt_impl = None
+
+    def _kernel_is_available() -> bool:
+        return False
 
 
 class AuditorySpectrogram:
-    """
-    Compute auditory spectrogram mimicking peripheral auditory processing.
+    """Cochlear-model spectrogram following the NSL toolbox.
 
-    y(t,f) = (max(δf(a(t) * hc(t,f)), 0) * w(t,τ))^(1/3)
+    Implements the five-stage pipeline ``y1 -> y2 -> y3 -> y4 -> y5``
+    described in Chi, Ru & Shamma (2005):
+
+    .. math::
+
+        y(t,f) = (\\max(\\delta_f(a(t) * h_c(t,f)), 0) * w(t,\\tau))^{1/3}
+
+    The y1 (gammatone cochlear filter) stage uses the custom batched
+    SOS CUDA kernel from :mod:`pygaborstm.gammatone_kernel` when GPU is
+    enabled and the kernel is available; otherwise it falls back to a
+    per-channel ``scipy``/``cupyx`` ``sosfilt`` loop.
+
+    Parameters
+    ----------
+    config : Config, optional
+        Configuration object. If ``None``, uses defaults.
+
+    Attributes
+    ----------
+    center_freqs : np.ndarray
+        Cochlear filter center frequencies in Hz, length ``n_filters``.
+    sample_rate : int
+        Audio sample rate in Hz.
+    use_gpu : bool
+        Whether GPU acceleration is active.
     """
 
     def __init__(self, config: Config | None = None):
@@ -37,9 +81,9 @@ class AuditorySpectrogram:
         self.frmlen_ms = cfg.frmlen_ms
         self.use_gpu = cfg.use_gpu
 
-        # Get array and signal modules (numpy/cupy)
         self.xp = get_array_module(self.use_gpu)
         self.signal = get_signal_module(self.use_gpu)
+        self.float_dtype, self.complex_dtype = get_dtypes()
 
         self.filter_order = 4
         frame_adjustment = 2 ** (self.filter_order - 1)
@@ -47,31 +91,42 @@ class AuditorySpectrogram:
 
         self.f_max = self.f_min * (2**self.octaves)
         self.center_freqs = self._create_frequency_scale()
+
+        # Precompute at init (config-dependent, never changes)
+        self._L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate)
         self._init_gammatone_filters()
+        self._init_y5_kernel()
+        self._init_y1_fast_path()
+
+        # Lazy cache (input-length dependent, rebuilt on shape change)
+        self._cached_n_samples = None
+        self._y5_kernel_fft = None
+        self._y5_n_fft = None
+        self._y5_pad = None
+
+    # ----- init helpers (run once) -------------------------------------------
 
     def _create_frequency_scale(self) -> np.ndarray:
-        """Create logarithmically spaced center frequencies."""
         return np.logspace(
             np.log2(self.f_min), np.log2(self.f_max), self.n_filters, base=2.0
         )
 
     def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
-        """Normalize audio to zero mean and unit max amplitude."""
+        audio = audio.astype(self.float_dtype)
         audio = audio - np.mean(audio)
         audio = audio / (np.max(np.abs(audio)) + 1e-10)
         return audio
 
-    def _init_gammatone_filters(self):
-        """Pre-compute gammatone filter coefficients (SOS format)."""
-        filter_order = 4
+    def _init_gammatone_filters(self) -> None:
+        """Build SOS coefficients and stack on device (no per-call transfer)."""
+        xp = self.xp
         erb_scale = 0.6
         T = 1.0 / self.sample_rate
 
         ERB = 24.7 * (4.37 * self.center_freqs / 1000.0 + 1.0) * erb_scale
         B = 1.019 * 2 * np.pi * ERB
 
-        self._gammatone_sos = []
-
+        sos_list = []
         for fc, bw in zip(self.center_freqs, B):
             omega = 2 * np.pi * fc
             r = np.exp(-bw * T)
@@ -79,40 +134,99 @@ class AuditorySpectrogram:
 
             a0, a1, a2 = 1.0, -2.0 * r * np.cos(theta), r * r
             b0, b1, b2 = 1.0, 0.0, 0.0
+            sos = np.array([[b0, b1, b2, a0, a1, a2]] * self.filter_order)
 
-            sos = np.array([[b0, b1, b2, a0, a1, a2]] * filter_order)
-
-            # Normalize gain at center frequency
             w = 2 * np.pi * fc / self.sample_rate
             z = np.exp(1j * w)
             H_section = (b0 + b1 * z**-1 + b2 * z**-2) / (a0 + a1 * z**-1 + a2 * z**-2)
-            gain = np.abs(H_section**filter_order)
-
+            gain = np.abs(H_section**self.filter_order)
             if gain > 0:
                 sos[0, 0] = b0 / gain
 
-            self._gammatone_sos.append(sos)
+            sos_list.append(sos)
 
-    def _y1_cochlear_filter(self, audio: np.ndarray):
-        """Stage 1: Apply gammatone filterbank."""
+        # Stack to (n_filters, filter_order, 6) and transfer once.
+        # SOS stays float64 for sosfilt numerical stability.
+        sos_stack = np.stack(sos_list, axis=0)
+        self._sos_device = xp.asarray(sos_stack)
+
+    def _init_y5_kernel(self) -> None:
+        """Precompute leaky integration kernel (config-dependent only).
+        The FFT is lazily computed in _ensure_cache since it depends on input length."""
+        tau_sec = self.tau_ms / 1000.0
+        self._tau_samples = int(tau_sec * self.sample_rate)
+        t = np.arange(self._tau_samples, dtype=np.float64) / self.sample_rate
+        kernel = np.exp(-t / tau_sec)
+        kernel = kernel / kernel.sum()
+        self._y5_kernel_host = kernel.astype(self.float_dtype)
+
+    def _init_y1_fast_path(self) -> None:
+        """Resolve the GPU batched-SOS kernel for the y1 stage, if available.
+
+        Pre-converts the SOS bank to float32 once. The kernel runs the
+        biquad recurrence in float32 (~8x faster than float64 on consumer
+        Ampere, where FP64 throughput is throttled to 1/64 of FP32). The
+        kernel currently only handles float32 audio, so we gate on that.
+        """
+        self._batched_sosfilt = None
+        self._sos_device_f32 = None
+        if (
+            self.use_gpu
+            and _batched_sosfilt_impl is not None
+            and _kernel_is_available()
+            and self.float_dtype == np.float32
+        ):
+            self._batched_sosfilt = _batched_sosfilt_impl
+            self._sos_device_f32 = self._sos_device.astype(np.float32)
+
+    # ----- lazy cache (rebuilt on input length change) -----------------------
+
+    def _ensure_cache(self, n_samples: int) -> None:
+        """Rebuild cached FFT data if input length changed."""
+        if n_samples == self._cached_n_samples:
+            return
+
         xp = self.xp
+        n_conv = n_samples + self._tau_samples - 1
+        n_fft = next_fast_len(n_conv, self.use_gpu)
 
-        audio_device = xp.asarray(audio)
-        n_samples = len(audio)
-        output = xp.zeros((self.n_filters, n_samples))
+        kernel_device = xp.asarray(self._y5_kernel_host)
+        self._y5_n_fft = n_fft
+        self._y5_pad = (self._tau_samples - 1) // 2
+        # [1, n_fft] for broadcasting across all channels
+        self._y5_kernel_fft = xp.fft.rfft(kernel_device, n=n_fft)[None, :]
+        self._cached_n_samples = n_samples
 
-        for i, sos in enumerate(self._gammatone_sos):
-            sos_device = xp.asarray(sos)
-            output[i, :] = 2.0 * self.signal.sosfilt(sos_device, audio_device)
+    # ----- pipeline stages ---------------------------------------------------
 
+    def _y1_cochlear_filter(self, audio):
+        """Stage 1: Gammatone filterbank using cached SOS coefficients.
+
+        GPU fast path: single batched-SOS kernel launch, float32 internal.
+        Fallback: per-channel scipy/cupyx sosfilt loop at self.float_dtype.
+        """
+        xp = self.xp
+        audio_device = xp.asarray(audio, dtype=self.float_dtype)
+
+        if self._batched_sosfilt is not None:
+            return self._batched_sosfilt(
+                self._sos_device_f32,
+                audio_device,
+                gain=2.0,
+                precision="float32",
+            )
+
+        n_samples = audio_device.shape[0]
+        output = xp.empty((self.n_filters, n_samples), dtype=self.float_dtype)
+        for i in range(self.n_filters):
+            output[i, :] = 2.0 * self.signal.sosfilt(self._sos_device[i], audio_device)
         return output
 
     def _y2_transduction(self, y1):
         """Stage 2: Hair cell transduction (derivative + compression)."""
         xp = self.xp
         y2 = xp.diff(y1, axis=1, prepend=y1[:, 0:1])
-        scale = 0.5
-        return xp.tanh(y2 * scale)
+        return xp.tanh(y2 * 0.5)
 
     def _y3_lateral_inhibition(self, y2):
         """Stage 3: Lateral inhibitory network."""
@@ -124,74 +238,88 @@ class AuditorySpectrogram:
 
     def _y4_rectification(self, y3):
         """Stage 4: Half-wave rectification."""
-        xp = self.xp
-        return xp.maximum(y3, 0)
+        return self.xp.maximum(y3, 0)
 
     def _y5_integration(self, y4):
-        """Stage 5: Leaky temporal integration."""
+        """Stage 5: Leaky integration using cached kernel FFT (batch across all channels)."""
         xp = self.xp
+        n_fft = self._y5_n_fft
 
-        tau_sec = self.tau_ms / 1000.0
-        tau_samples = int(tau_sec * self.sample_rate)
-        t = xp.arange(tau_samples) / self.sample_rate
+        Y4_fft = xp.fft.rfft(y4, n=n_fft, axis=1)
+        y5_full = xp.fft.irfft(Y4_fft * self._y5_kernel_fft, n=n_fft, axis=1)
 
-        kernel = xp.exp(-t / tau_sec)
-        kernel = kernel / kernel.sum()
-
-        y5 = xp.zeros_like(y4)
-        for i in range(y4.shape[0]):
-            y5[i, :] = xp.convolve(y4[i, :], kernel, mode="same")
-
-        return y5
+        pad = self._y5_pad
+        n = y4.shape[1]
+        return y5_full[:, pad : pad + n]
 
     def _downsample(self, spectrogram):
-        """Downsample to frame rate."""
+        """Downsample using device-native resample_poly (no CPU round-trip on GPU)."""
+        return self.signal.resample_poly(spectrogram, up=1, down=self._L_frm, axis=1)
+
+    # ----- public API --------------------------------------------------------
+
+    def compute_device(self, audio: np.ndarray):
+        """Compute the spectrogram and leave the result on the active device.
+
+        Hot path. Output uses the ``(n_time, n_freq)`` orientation that
+        :meth:`GaborFilterbank.compute_device` expects, so the two
+        stages can be chained without a host round-trip.
+
+        Parameters
+        ----------
+        audio : np.ndarray
+            1D audio signal. Multi-dimensional inputs are flattened.
+
+        Returns
+        -------
+        np.ndarray or cupy.ndarray
+            Spectrogram of shape ``(n_time, n_freq)`` on the active
+            backend (numpy or cupy).
+        """
         xp = self.xp
 
-        shft = 0
-        L_frm = int((self.frmlen_ms / 1000.0) * self.sample_rate * (2**shft))
-
-        n_samples = spectrogram.shape[1]
-        n_frames = int(xp.ceil(n_samples / L_frm))
-
-        if n_samples < n_frames * L_frm:
-            pad_width = ((0, 0), (0, n_frames * L_frm - n_samples))
-            spectrogram = xp.pad(spectrogram, pad_width, mode="constant")
-
-        return spectrogram[:, L_frm - 1 :: L_frm]
-
-    def compute(self, audio: np.ndarray) -> Spectrogram:
-        """
-        Compute auditory spectrogram.
-
-        Args:
-            audio: Input audio signal (1D array)
-
-        Returns:
-            Spectrogram object with data and metadata
-        """
         if audio.ndim > 1:
             audio = audio.flatten()
 
         audio = self._preprocess_audio(audio)
+        self._ensure_cache(len(audio))
 
         y1 = self._y1_cochlear_filter(audio)
         y2 = self._y2_transduction(y1)
         y3 = self._y3_lateral_inhibition(y2)
         y4 = self._y4_rectification(y3)
         y5 = self._y5_integration(y4)
-        y5 = self.xp.cbrt(y5)
+        y5 = xp.cbrt(y5)
         y5 = self._downsample(y5)
 
-        # Transfer back to CPU for output
-        y5 = to_numpy(y5)
+        return y5.T  # (n_freq, n_time) → (n_time, n_freq)
 
-        # Build time axis
+    def compute(self, audio: np.ndarray) -> Spectrogram:
+        """Compute the spectrogram and copy the result to host as a dataclass.
+
+        Wraps :meth:`compute_device` with a host transfer and a transpose
+        back to the legacy ``(n_freq, n_time)`` orientation expected by
+        downstream tooling and plots.
+
+        Parameters
+        ----------
+        audio : np.ndarray
+            1D audio signal.
+
+        Returns
+        -------
+        Spectrogram
+            Host-side spectrogram with ``data`` shape ``(n_freq, n_time)``
+            plus time, frequency, and sample-rate metadata.
+        """
+        device_out = self.compute_device(audio)  # (n_time, n_freq)
+        host = to_numpy(device_out).T  # (n_freq, n_time)
+
         frame_period = self.frmlen_ms / 1000.0
-        times = np.arange(y5.shape[1]) * frame_period
+        times = np.arange(host.shape[1]) * frame_period
 
         return Spectrogram(
-            data=y5,
+            data=host,
             times=times,
             freqs=self.center_freqs,
             sr=self.sample_rate,

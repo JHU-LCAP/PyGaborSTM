@@ -46,3 +46,7 @@ logs/
 outputs/
 checkpoints/
 *.log
+
+images/
+
+site/

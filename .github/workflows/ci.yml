@@ -45,4 +45,21 @@ jobs:
         run: poetry install
 
       - name: Run tests
-        run: poetry run pytest tests/ -v --cov=pygaborstm --cov-report=term-missing
+        run: poetry run pytest tests/ -v -m "not gpu" --cov=pygaborstm --cov-report=term-missing
+
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install doc requirements
+        run: pip install -r docs/requirements.txt
+
+      - name: Build docs
+        run: mkdocs build --strict

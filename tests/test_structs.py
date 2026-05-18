@@ -24,6 +24,15 @@ class TestSpectrogram:
     def test_duration(self):
         assert self.spec.duration > 0
 
+    def test_duration_single_frame(self):
+        spec = Spectrogram(
+            data=np.ones((128, 1)),
+            times=np.array([0.0]),
+            freqs=self.spec.freqs,
+            sr=16000,
+        )
+        assert spec.duration == 0.0
+
     def test_to_numpy(self):
         arr = self.spec.to_numpy()
         assert isinstance(arr, np.ndarray)
@@ -83,3 +92,22 @@ class TestRSF:
         left = np.flip(folded[:, :mid], axis=1)
         right = folded[:, mid:]
         np.testing.assert_array_almost_equal(left, right)
+
+    def test_rate_scale_matrix_split(self):
+        up, down = self.rsf.rate_scale_matrix_split()
+        assert up.shape == (6, 5)
+        assert down.shape == (6, 5)
+
+    def test_upward_rates(self):
+        up = self.rsf.upward_rates()
+        np.testing.assert_array_equal(up, [-32, -16, -8, -4, -2])
+
+    def test_downward_rates(self):
+        down = self.rsf.downward_rates()
+        np.testing.assert_array_equal(down, [2, 4, 8, 16, 32])
+
+    def test_split_partitions_data(self):
+        """Splitting + concatenating along rates axis should reconstruct original."""
+        up, down = self.rsf._split_by_direction()
+        recon = np.concatenate([up, down], axis=1)
+        np.testing.assert_array_equal(recon, self.rsf.data)

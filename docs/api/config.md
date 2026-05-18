@@ -1,0 +1,3 @@
+# Config
+
+::: pygaborstm.config
