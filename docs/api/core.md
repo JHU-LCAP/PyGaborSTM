@@ -1,0 +1,3 @@
+# PyGaborSTM
+
+::: pygaborstm.core

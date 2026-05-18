@@ -115,6 +115,11 @@ poetry run ruff check --fix .       # lint and fix
 poetry run ruff format .            # format code
 ```
 
+### Serve Docs locally
+```bash
+poetry run mkdocs serve
+```
+
 Note: Please lint and format before pushing, as CI will fail otherwise.
 
 ### Jupyter Kernel

@@ -48,3 +48,5 @@ checkpoints/
 *.log
 
 images/
+
+site/
