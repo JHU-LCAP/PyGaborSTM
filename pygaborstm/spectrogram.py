@@ -41,10 +41,33 @@ except ImportError:
 
 
 class AuditorySpectrogram:
-    """
-    Compute auditory spectrogram mimicking peripheral auditory processing.
+    """Cochlear-model spectrogram following the NSL toolbox.
 
-    y(t,f) = (max(δf(a(t) * hc(t,f)), 0) * w(t,τ))^(1/3)
+    Implements the five-stage pipeline ``y1 -> y2 -> y3 -> y4 -> y5``
+    described in Chi, Ru & Shamma (2005):
+
+    .. math::
+
+        y(t,f) = (\\max(\\delta_f(a(t) * h_c(t,f)), 0) * w(t,\\tau))^{1/3}
+
+    The y1 (gammatone cochlear filter) stage uses the custom batched
+    SOS CUDA kernel from :mod:`pygaborstm.gammatone_kernel` when GPU is
+    enabled and the kernel is available; otherwise it falls back to a
+    per-channel ``scipy``/``cupyx`` ``sosfilt`` loop.
+
+    Parameters
+    ----------
+    config : Config, optional
+        Configuration object. If ``None``, uses defaults.
+
+    Attributes
+    ----------
+    center_freqs : np.ndarray
+        Cochlear filter center frequencies in Hz, length ``n_filters``.
+    sample_rate : int
+        Audio sample rate in Hz.
+    use_gpu : bool
+        Whether GPU acceleration is active.
     """
 
     def __init__(self, config: Config | None = None):
@@ -236,17 +259,22 @@ class AuditorySpectrogram:
     # ----- public API --------------------------------------------------------
 
     def compute_device(self, audio: np.ndarray):
-        """
-        Hot path. Returns spectrogram on device in (n_time, n_freq) orientation.
+        """Compute the spectrogram and leave the result on the active device.
 
-        This is the orientation GaborFilterbank.compute_device() expects.
-        No host transfer — stays on GPU if use_gpu=True.
+        Hot path. Output uses the ``(n_time, n_freq)`` orientation that
+        :meth:`GaborFilterbank.compute_device` expects, so the two
+        stages can be chained without a host round-trip.
 
-        Args:
-            audio: 1D numpy array
+        Parameters
+        ----------
+        audio : np.ndarray
+            1D audio signal. Multi-dimensional inputs are flattened.
 
-        Returns:
-            Device array (numpy or cupy) of shape (n_time, n_freq)
+        Returns
+        -------
+        np.ndarray or cupy.ndarray
+            Spectrogram of shape ``(n_time, n_freq)`` on the active
+            backend (numpy or cupy).
         """
         xp = self.xp
 
@@ -267,16 +295,22 @@ class AuditorySpectrogram:
         return y5.T  # (n_freq, n_time) → (n_time, n_freq)
 
     def compute(self, audio: np.ndarray) -> Spectrogram:
-        """
-        Compute auditory spectrogram. Returns Spectrogram dataclass on host.
+        """Compute the spectrogram and copy the result to host as a dataclass.
 
-        Spectrogram.data uses the legacy (n_freq, n_time) orientation.
+        Wraps :meth:`compute_device` with a host transfer and a transpose
+        back to the legacy ``(n_freq, n_time)`` orientation expected by
+        downstream tooling and plots.
 
-        Args:
-            audio: Input audio signal (1D array)
+        Parameters
+        ----------
+        audio : np.ndarray
+            1D audio signal.
 
-        Returns:
-            Spectrogram object with data and metadata
+        Returns
+        -------
+        Spectrogram
+            Host-side spectrogram with ``data`` shape ``(n_freq, n_time)``
+            plus time, frequency, and sample-rate metadata.
         """
         device_out = self.compute_device(audio)  # (n_time, n_freq)
         host = to_numpy(device_out).T  # (n_freq, n_time)

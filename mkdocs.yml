@@ -1,0 +1,74 @@
+site_name: PyGaborSTM
+site_description: Rate-Scale-Frequency (RSF) representations from audio via auditory spectrograms and 2D Gabor filterbanks.
+site_url: https://pygaborstm.readthedocs.io/
+repo_url: https://github.com/JHU-LCAP/PyGaborSTM
+repo_name: JHU-LCAP/PyGaborSTM
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            docstring_section_style: spacy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - API Reference:
+      - api/index.md
+      - PyGaborSTM: api/core.md
+      - Config: api/config.md
+      - Spectrogram (stage): api/spectrogram.md
+      - GaborFilterbank (stage): api/gabor.md
+      - Data structures: api/structs.md
+      - Plotting: api/plot.md
+      - Analysis: api/analysis.md
+      - Backend helpers: api/backend.md
+      - CUDA kernel: api/gammatone_kernel.md
