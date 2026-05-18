@@ -4,7 +4,10 @@ Configuration for PyGaborSTM.
 Default values match Bellur & Elhilali (2017).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import numpy as np
+
+from .constants import STANDARD_RATES, STANDARD_SCALES
 
 
 @dataclass
@@ -23,6 +26,8 @@ class Config:
     frmlen_ms: float = 16.0
 
     # RSF / Gabor
+    rates: np.ndarray = field(default_factory=lambda: STANDARD_RATES.copy())
+    scales: np.ndarray = field(default_factory=lambda: STANDARD_SCALES.copy())
     resolution: str = "low"
     rsf_frame_size_ms: int = 500
     rsf_frame_shift_ms: int = 10

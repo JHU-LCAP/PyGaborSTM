@@ -11,9 +11,6 @@ from .structs import Spectrogram, RSF
 if TYPE_CHECKING:
     pass
 
-STANDARD_RATES = np.array([-32, -16, -8, -4, -2, 2, 4, 8, 16, 32])
-STANDARD_SCALES = np.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0])
-
 
 def _get_freq_ticks(freqs: np.ndarray):
     """Get frequency tick positions and labels in Hz."""
@@ -43,6 +40,7 @@ def plt_spectrogram(
     title_fontsize: int = 12,
     label_fontsize: int = 10,
     tick_fontsize: int = 9,
+    interpolation: str = "bilinear",
 ) -> Axes:
     """
     Plot a single auditory spectrogram.
@@ -58,6 +56,7 @@ def plt_spectrogram(
         title_fontsize: Title font size
         label_fontsize: Axis label font size
         tick_fontsize: Tick label font size
+        interpolation: Interpolation method to smooth out spec plot
 
     Returns:
         Axes object
@@ -87,7 +86,7 @@ def plt_spectrogram(
         origin="lower",
         extent=(0, duration, 0, n_filters),
         cmap=cmap,
-        interpolation="nearest",
+        interpolation=interpolation,
     )
 
     ax.set_title(title, fontsize=title_fontsize)
@@ -170,6 +169,9 @@ def plt_spectrogram_grid(
 
     if suptitle:
         fig.suptitle(suptitle, fontsize=14, fontweight="bold")
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+    else:
+        plt.tight_layout()
 
     plt.tight_layout()
 
@@ -222,8 +224,12 @@ def plt_rsf(
         r_rates = rsf.rates if rates is None else rates
         r_scales = rsf.scales if scales is None else scales
     else:
-        r_rates = rates if rates is not None else STANDARD_RATES
-        r_scales = scales if scales is not None else STANDARD_SCALES
+        if rates is None or scales is None:
+            raise ValueError(
+                "rates and scales must be provided when rsf is a raw array"
+            )
+        r_rates = rates
+        r_scales = scales
         data = rsf.mean(axis=(0, 3)).T
         if fold:
             n_rates_half = data.shape[1] // 2
@@ -255,35 +261,39 @@ def plt_rsf(
     # midpoint between negative (upward) and positive (downward) rates
     ax.axvline(x=(n_rates - 1) / 2, color="white", linewidth=1, linestyle="-")
 
+    # Standard tick values (readable at any resolution)
+    STANDARD_RATES = [-32, -16, -8, -4, -2, 2, 4, 8, 16, 32]
+    STANDARD_SCALES = [0.25, 0.5, 1, 2, 4, 8]
+
     # Map rate values to pixel positions (log-spaced)
     rate_min, rate_max = np.min(np.abs(r_rates)), np.max(np.abs(r_rates))
 
     rate_tick_positions = []
     rate_tick_labels = []
-    for std_rate in STANDARD_RATES:
-        abs_rate = abs(std_rate)
-        if rate_min <= abs_rate <= rate_max:
-            log_pos = np.log2(abs_rate / rate_min) / np.log2(rate_max / rate_min)
-            if std_rate < 0:
-                pixel_pos = (n_rates / 2 - 1) * (1 - log_pos)
-            else:
-                pixel_pos = (n_rates / 2) + (n_rates / 2 - 1) * log_pos
-
-            rate_tick_positions.append(pixel_pos)
-            rate_tick_labels.append(str(int(std_rate)))
+    for rate in STANDARD_RATES:
+        abs_rate = abs(rate)
+        if abs_rate < rate_min or abs_rate > rate_max:
+            continue
+        log_pos = np.log2(abs_rate / rate_min) / np.log2(rate_max / rate_min)
+        if rate < 0:
+            pixel_pos = (n_rates / 2 - 1) * (1 - log_pos)
+        else:
+            pixel_pos = (n_rates / 2) + (n_rates / 2 - 1) * log_pos
+        rate_tick_positions.append(pixel_pos)
+        rate_tick_labels.append(str(rate))
 
     # Map scale values to pixel positions (log-spaced)
     scale_min, scale_max = np.min(r_scales), np.max(r_scales)
 
     scale_tick_positions = []
     scale_tick_labels = []
-    for std_scale in STANDARD_SCALES:
-        if scale_min <= std_scale <= scale_max:
-            log_pos = np.log2(std_scale / scale_min) / np.log2(scale_max / scale_min)
-            pixel_pos = (n_scales - 1) * log_pos
-
-            scale_tick_positions.append(pixel_pos)
-            scale_tick_labels.append(str(std_scale))
+    for scale in STANDARD_SCALES:
+        if scale < scale_min or scale > scale_max:
+            continue
+        log_pos = np.log2(scale / scale_min) / np.log2(scale_max / scale_min)
+        pixel_pos = (n_scales - 1) * log_pos
+        scale_tick_positions.append(pixel_pos)
+        scale_tick_labels.append(f"{scale:.2f}" if scale < 1 else str(int(scale)))
 
     ax.set_title(title, fontsize=title_fontsize)
     ax.set_xlabel("Rate (Hz)", fontsize=label_fontsize)
@@ -342,8 +352,12 @@ def plt_rsf_grid(
         r_rates = rates if rates is not None else first_rsf.rates
         r_scales = scales if scales is not None else first_rsf.scales
     else:
-        r_rates = rates if rates is not None else STANDARD_RATES
-        r_scales = scales if scales is not None else STANDARD_SCALES
+        if rates is None or scales is None:
+            raise ValueError(
+                "rates and scales must be provided when rsf is a raw array"
+            )
+        r_rates = rates
+        r_scales = scales
 
     # Calculate grid dimensions based on actual number of plots
     actual_cols = min(n_plots, n_cols)
@@ -381,8 +395,9 @@ def plt_rsf_grid(
 
     if suptitle:
         fig.suptitle(suptitle, fontsize=14, fontweight="bold")
-
-    plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+    else:
+        plt.tight_layout()
 
     if save_path:
         plt.savefig(save_path, dpi=200, bbox_inches="tight")
