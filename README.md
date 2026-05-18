@@ -107,7 +107,8 @@ PyGaborSTM/
 ```bash
 poetry install                      # Install all dependencies
 poetry run jupyter notebook         # Run notebooks
-poetry run pytest -v                # Run tests
+pytest -m "not gpu"                 # Run all tests exluding GPU kernel tests (used in CI/CD)
+poetry run pytest -v                # Run all tests including GPU kernel tests
 poetry run ruff check --fix .       # lint and fix
 poetry run ruff format .            # format code
 ```

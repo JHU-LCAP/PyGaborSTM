@@ -16,7 +16,13 @@ import numpy as np
 
 from .config import Config
 from .structs import Spectrogram
-from .backend import get_array_module, get_signal_module, to_numpy, next_fast_len, get_dtypes
+from .backend import (
+    get_array_module,
+    get_signal_module,
+    to_numpy,
+    next_fast_len,
+    get_dtypes,
+)
 
 # Optional GPU fast path for the y1 stage. A single CUDA kernel launch
 # runs all SOS cascades in parallel, replacing the per-channel sosfilt
@@ -29,7 +35,9 @@ try:
     )
 except ImportError:
     _batched_sosfilt_impl = None
-    _kernel_is_available = lambda: False
+
+    def _kernel_is_available() -> bool:
+        return False
 
 
 class AuditorySpectrogram:
@@ -58,7 +66,7 @@ class AuditorySpectrogram:
         frame_adjustment = 2 ** (self.filter_order - 1)
         self.alph = np.exp(-1 / (self.tau_ms * frame_adjustment))
 
-        self.f_max = self.f_min * (2 ** self.octaves)
+        self.f_max = self.f_min * (2**self.octaves)
         self.center_freqs = self._create_frequency_scale()
 
         # Precompute at init (config-dependent, never changes)
@@ -107,10 +115,8 @@ class AuditorySpectrogram:
 
             w = 2 * np.pi * fc / self.sample_rate
             z = np.exp(1j * w)
-            H_section = (b0 + b1 * z**-1 + b2 * z**-2) / (
-                a0 + a1 * z**-1 + a2 * z**-2
-            )
-            gain = np.abs(H_section ** self.filter_order)
+            H_section = (b0 + b1 * z**-1 + b2 * z**-2) / (a0 + a1 * z**-1 + a2 * z**-2)
+            gain = np.abs(H_section**self.filter_order)
             if gain > 0:
                 sos[0, 0] = b0 / gain
 
@@ -181,8 +187,10 @@ class AuditorySpectrogram:
 
         if self._batched_sosfilt is not None:
             return self._batched_sosfilt(
-                self._sos_device_f32, audio_device,
-                gain=2.0, precision="float32",
+                self._sos_device_f32,
+                audio_device,
+                gain=2.0,
+                precision="float32",
             )
 
         n_samples = audio_device.shape[0]
@@ -270,8 +278,8 @@ class AuditorySpectrogram:
         Returns:
             Spectrogram object with data and metadata
         """
-        device_out = self.compute_device(audio)   # (n_time, n_freq)
-        host = to_numpy(device_out).T             # (n_freq, n_time)
+        device_out = self.compute_device(audio)  # (n_time, n_freq)
+        host = to_numpy(device_out).T  # (n_freq, n_time)
 
         frame_period = self.frmlen_ms / 1000.0
         times = np.arange(host.shape[1]) * frame_period

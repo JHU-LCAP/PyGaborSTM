@@ -11,6 +11,7 @@ import numpy as np
 try:
     import cupy as cp
     from cupyx.scipy import signal as cp_signal
+
     CUPY_AVAILABLE = True
 except ImportError:
     cp = None
@@ -76,6 +77,7 @@ def get_available_memory(use_gpu: bool = False) -> int:
 
     try:
         import psutil
+
         return psutil.virtual_memory().available
     except ImportError:
         pass

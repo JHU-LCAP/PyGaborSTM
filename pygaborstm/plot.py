@@ -11,6 +11,7 @@ from .structs import Spectrogram, RSF
 if TYPE_CHECKING:
     pass
 
+
 def _get_freq_ticks(freqs: np.ndarray):
     """Get frequency tick positions and labels in Hz."""
     f_min, f_max = freqs[0], freqs[-1]
@@ -224,7 +225,9 @@ def plt_rsf(
         r_scales = rsf.scales if scales is None else scales
     else:
         if rates is None or scales is None:
-            raise ValueError("rates and scales must be provided when rsf is a raw array")
+            raise ValueError(
+                "rates and scales must be provided when rsf is a raw array"
+            )
         r_rates = rates
         r_scales = scales
         data = rsf.mean(axis=(0, 3)).T
@@ -350,7 +353,9 @@ def plt_rsf_grid(
         r_scales = scales if scales is not None else first_rsf.scales
     else:
         if rates is None or scales is None:
-            raise ValueError("rates and scales must be provided when rsf is a raw array")
+            raise ValueError(
+                "rates and scales must be provided when rsf is a raw array"
+            )
         r_rates = rates
         r_scales = scales
 

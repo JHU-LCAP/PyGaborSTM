@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import cupy as cp
+
     _HAS_CUPY = True
 except ImportError:  # CPU-only environment
     cp = None  # type: ignore[assignment]
@@ -92,29 +93,36 @@ extern "C" __global__ void batched_sosfilt_kernel(
 
 _kernel_cache: dict[tuple[int, str], "cp.RawKernel"] = {}
 
-_DTYPE_MAP = {"float64": ("double", cp.float64 if _HAS_CUPY else None),
-              "float32": ("float",  cp.float32 if _HAS_CUPY else None)}
+_DTYPE_MAP = {
+    "float64": ("double", cp.float64 if _HAS_CUPY else None),
+    "float32": ("float", cp.float32 if _HAS_CUPY else None),
+}
+
 
 def is_available() -> bool:
     """True iff CuPy + nvrtc can compile the kernel on this machine."""
     if not _HAS_CUPY:
         return False
     try:
-        _get_kernel(1, "float32")   # was: _get_kernel(1) — missing precision arg
+        _get_kernel(1, "float32")  # was: _get_kernel(1) — missing precision arg
         return True
     except Exception as e:
         logger.warning("batched_sosfilt kernel unavailable: %s", e)
         return False
+
 
 def _get_kernel(n_sections: int, precision: str) -> "cp.RawKernel":
     key = (n_sections, precision)
     if key in _kernel_cache:
         return _kernel_cache[key]
     c_type, _ = _DTYPE_MAP[precision]
-    source = (f"#define N_SECTIONS {int(n_sections)}\n"
-              f"#define DTYPE {c_type}\n" + _KERNEL_TEMPLATE)
-    kernel = cp.RawKernel(code=source, name="batched_sosfilt_kernel",
-                          options=("-std=c++14",))
+    source = (
+        f"#define N_SECTIONS {int(n_sections)}\n"
+        f"#define DTYPE {c_type}\n" + _KERNEL_TEMPLATE
+    )
+    kernel = cp.RawKernel(
+        code=source, name="batched_sosfilt_kernel", options=("-std=c++14",)
+    )
     _kernel_cache[key] = kernel
     return kernel
 
@@ -139,7 +147,9 @@ def batched_sosfilt(
 
     _, expected_dtype = _DTYPE_MAP[precision]
     if sos.dtype != expected_dtype:
-        raise TypeError(f"sos must be {expected_dtype} for precision={precision!r}, got {sos.dtype}")
+        raise TypeError(
+            f"sos must be {expected_dtype} for precision={precision!r}, got {sos.dtype}"
+        )
     if x.dtype != cp.float32:
         raise TypeError(f"x must be float32, got {x.dtype}")
 
@@ -154,6 +164,9 @@ def batched_sosfilt(
     kernel = _get_kernel(n_sections, precision)
     threads = 32
     blocks = (n_channels + threads - 1) // threads
-    kernel((blocks,), (threads,),
-           (sos_c, x_c, out, np.int32(n_channels), np.int32(n_samples), np.float32(gain)))
+    kernel(
+        (blocks,),
+        (threads,),
+        (sos_c, x_c, out, np.int32(n_channels), np.int32(n_samples), np.float32(gain)),
+    )
     return out

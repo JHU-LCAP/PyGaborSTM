@@ -34,6 +34,7 @@ __all__ = [
     "Spectrogram",
     "RSF",
     # Namespaced modules
+    "analysis",
     "plot",
     "structs",
 ]

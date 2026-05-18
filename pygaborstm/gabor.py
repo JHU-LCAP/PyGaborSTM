@@ -22,8 +22,11 @@ from typing import Tuple
 from .config import Config
 from .structs import Spectrogram, RSF
 from .backend import (
-    get_array_module, to_numpy,
-    next_fast_len, get_dtypes, get_available_memory,
+    get_array_module,
+    to_numpy,
+    next_fast_len,
+    get_dtypes,
+    get_available_memory,
 )
 
 
@@ -55,7 +58,7 @@ class GaborFilterbank:
         "high": 4,
         "ultra": 8,
         "max": 16,
-        "overkill": 32
+        "overkill": 32,
     }
 
     # Above this kernel count, warn at construction time: compute work scales
@@ -137,9 +140,7 @@ class GaborFilterbank:
             np.log2(rate_min), np.log2(rate_max), n_rates_pos, base=2
         )
         rates = np.concatenate([-rates_pos[::-1], rates_pos])
-        scales = np.logspace(
-            np.log2(scale_min), np.log2(scale_max), n_scales, base=2
-        )
+        scales = np.logspace(np.log2(scale_min), np.log2(scale_max), n_scales, base=2)
         return rates, scales
 
     # ----- lazy cache (rebuilt on input shape change) -------------------------
@@ -153,8 +154,12 @@ class GaborFilterbank:
 
         # Meshgrid
         octaves_per_bin = self.bandwidth_oct / n_freq
-        t_grid = (xp.arange(n_time, dtype=self.float_dtype) - n_time / 2) * self.time_per_frame
-        f_grid = (xp.arange(n_freq, dtype=self.float_dtype) - n_freq / 2) * octaves_per_bin
+        t_grid = (
+            xp.arange(n_time, dtype=self.float_dtype) - n_time / 2
+        ) * self.time_per_frame
+        f_grid = (
+            xp.arange(n_freq, dtype=self.float_dtype) - n_freq / 2
+        ) * octaves_per_bin
         self._T, self._F = xp.meshgrid(t_grid, f_grid, indexing="ij")
 
         # FFT padding
@@ -167,7 +172,9 @@ class GaborFilterbank:
 
         # Frame integration
         window_size = int(self.rsf_frame_size_ms / 1000.0 / self.time_per_frame)
-        frame_shift = max(1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame))
+        frame_shift = max(
+            1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame)
+        )
         n_frames = max(1, (n_time - window_size) // frame_shift + 1)
         if n_frames == 1:
             window_size = n_time
@@ -182,8 +189,7 @@ class GaborFilterbank:
         mem_per_filter = 3 * self._pad_shape[0] * self._pad_shape[1] * bytes_per_complex
         available = get_available_memory(self.use_gpu)
         self._batch_size = min(
-            self._n_kernels,
-            max(1, int(available * 0.5 / mem_per_filter))
+            self._n_kernels, max(1, int(available * 0.5 / mem_per_filter))
         )
 
         # Invalidate kernel cache (shape changed)
@@ -205,7 +211,8 @@ class GaborFilterbank:
 
         # Pre-allocation check: would the cache fit?
         bytes_per_fft = (
-            self._pad_shape[0] * self._pad_shape[1]
+            self._pad_shape[0]
+            * self._pad_shape[1]
             * np.dtype(self.complex_dtype).itemsize
         )
         cache_bytes = K * bytes_per_fft
@@ -226,13 +233,16 @@ class GaborFilterbank:
         # bounded (the old all-at-once fft2 would itself OOM at high N
         # even when the final cache had room).
         self._kernel_ffts = xp.empty(
-            (K, *self._pad_shape), dtype=self.complex_dtype,
+            (K, *self._pad_shape),
+            dtype=self.complex_dtype,
         )
         for start in range(0, K, self._batch_size):
             end = min(start + self._batch_size, K)
             kernels_chunk = self._build_kernels_range(decoded_params, start, end)
             self._kernel_ffts[start:end] = xp.fft.fft2(
-                kernels_chunk, s=self._pad_shape, axes=(-2, -1),
+                kernels_chunk,
+                s=self._pad_shape,
+                axes=(-2, -1),
             ).astype(self.complex_dtype)
             del kernels_chunk
             if self.use_gpu:
@@ -287,8 +297,14 @@ class GaborFilterbank:
             Omega = self.scales[j]
             sigma_t_mult, sigma_f_mult, theta, alpha = decoded_params[k_idx]
             kernel = self._create_gabor_filter(
-                omega, Omega, self._T, self._F,
-                sigma_t_mult, sigma_f_mult, theta, alpha,
+                omega,
+                Omega,
+                self._T,
+                self._F,
+                sigma_t_mult,
+                sigma_f_mult,
+                theta,
+                alpha,
             )
             kernels.append(kernel)
         return xp.stack(kernels)
@@ -326,7 +342,9 @@ class GaborFilterbank:
             if self.use_gpu:
                 xp.cuda.Stream.null.synchronize()
 
-        rsf_data = rsf_flat.reshape(self._n_rates, self._n_scales, self._n_frames, n_freq)
+        rsf_data = rsf_flat.reshape(
+            self._n_rates, self._n_scales, self._n_frames, n_freq
+        )
         return rsf_data.transpose(2, 0, 1, 3)
 
     def _apply_filters_streaming(self, spec_fft, decoded_params):
@@ -360,7 +378,9 @@ class GaborFilterbank:
             # Build + FFT this chunk's kernels (the difference vs cached path)
             kernels_chunk = self._build_kernels_range(decoded_params, start, end)
             kernel_ffts_chunk = xp.fft.fft2(
-                kernels_chunk, s=self._pad_shape, axes=(-2, -1),
+                kernels_chunk,
+                s=self._pad_shape,
+                axes=(-2, -1),
             ).astype(self.complex_dtype)
             del kernels_chunk
 
@@ -377,7 +397,9 @@ class GaborFilterbank:
             if self.use_gpu:
                 xp.cuda.Stream.null.synchronize()
 
-        rsf_data = rsf_flat.reshape(self._n_rates, self._n_scales, self._n_frames, n_freq)
+        rsf_data = rsf_flat.reshape(
+            self._n_rates, self._n_scales, self._n_frames, n_freq
+        )
         return rsf_data.transpose(2, 0, 1, 3)
 
     # ----- param helpers -----------------------------------------------------
@@ -386,12 +408,14 @@ class GaborFilterbank:
         return np.full((self._n_kernels, 4), DEFAULT_PARAM_IDX, dtype=np.int32)
 
     def _decode_params(self, indices: np.ndarray) -> np.ndarray:
-        return np.column_stack([
-            PARAM_OPTIONS["sigma_t"][indices[:, 0]],
-            PARAM_OPTIONS["sigma_f"][indices[:, 1]],
-            PARAM_OPTIONS["theta"][indices[:, 2]],
-            PARAM_OPTIONS["alpha"][indices[:, 3]],
-        ])
+        return np.column_stack(
+            [
+                PARAM_OPTIONS["sigma_t"][indices[:, 0]],
+                PARAM_OPTIONS["sigma_f"][indices[:, 1]],
+                PARAM_OPTIONS["theta"][indices[:, 2]],
+                PARAM_OPTIONS["alpha"][indices[:, 3]],
+            ]
+        )
 
     # ----- public API --------------------------------------------------------
 

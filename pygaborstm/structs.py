@@ -6,6 +6,7 @@ def _array_module(array):
     """Get numpy or cupy depending on the array type."""
     try:
         import cupy as cp
+
         if isinstance(array, cp.ndarray):
             return cp
     except ImportError:
@@ -48,6 +49,7 @@ class Spectrogram:
 
     def to_numpy(self) -> np.ndarray:
         from .backend import to_numpy
+
         return to_numpy(self.data)
 
 
@@ -92,6 +94,7 @@ class RSF:
 
     def to_numpy(self) -> np.ndarray:
         from .backend import to_numpy
+
         return to_numpy(self.data)
 
     def mean_over_time(self):
@@ -111,7 +114,6 @@ class RSF:
         return self.rates[self.n_rates // 2 :]
 
     def rate_scale_matrix(self, fold: bool = False):
-        xp = _array_module(self.data)
         rs = self.data.mean(axis=(0, 3)).T
 
         if not fold:
