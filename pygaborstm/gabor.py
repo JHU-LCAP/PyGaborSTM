@@ -8,6 +8,11 @@ Pipeline:
     1. Cached: 2D Gabor kernels tuned to (rate, scale) pairs, plus their FFTs
     2. Hot path: FFT input spectrogram → broadcast multiply → batch IFFT
        → magnitude → frame integration
+
+Memory-adaptive: at high resolutions the kernel FFT cache can exceed GPU
+memory. When it would, falls back to streaming mode (kernels are rebuilt
+and FFT'd per chunk inside the compute loop). Slower per call but works on
+any GPU, including lower-memory devices like the Jetson Orin Nano.
 """
 
 import warnings
@@ -48,8 +53,18 @@ class GaborFilterbank:
         "low": 1,
         "medium": 2,
         "high": 4,
-        "ultra": 6,
+        "ultra": 8,
+        "max": 16,
+        "overkill": 32
     }
+
+    # Above this kernel count, warn at construction time: compute work scales
+    # linearly with n_kernels regardless of GPU memory or streaming mode.
+    _KERNEL_COUNT_WARN_THRESHOLD = 5000
+
+    # Fraction of available GPU memory we're willing to dedicate to the
+    # kernel FFT cache. Below this, build the cache; above it, stream.
+    _CACHE_MEMORY_BUDGET = 0.7
 
     def __init__(self, config: Config | None = None):
         cfg = config or Config()
@@ -72,6 +87,17 @@ class GaborFilterbank:
         self._n_scales = len(self.scales)
         self._n_kernels = self._n_rates * self._n_scales
 
+        if self._n_kernels > self._KERNEL_COUNT_WARN_THRESHOLD:
+            warnings.warn(
+                f"Resolution '{cfg.resolution}' produces {self._n_kernels} "
+                f"kernels ({self._n_rates} rates × {self._n_scales} scales). "
+                f"Compute scales linearly with this regardless of available "
+                f"memory — expect significantly longer per-file processing. "
+                f"Lower resolution if interactive performance matters.",
+                ResourceWarning,
+                stacklevel=2,
+            )
+
         # Lazy cache state (rebuilt on input shape change)
         self._cached_shape = None
         self._T = None
@@ -82,7 +108,7 @@ class GaborFilterbank:
         self._frame_indices = None
         self._n_frames = None
         self._batch_size = None
-        self._kernel_ffts = None  # cached for default params only
+        self._kernel_ffts = None  # cached when it fits; None → streaming path
 
     # ----- rates/scales (config-dependent, computed at init) ------------------
 
@@ -165,26 +191,52 @@ class GaborFilterbank:
         self._cached_shape = (n_time, n_freq)
 
     def _ensure_kernel_cache(self, decoded_params: np.ndarray) -> None:
-        """Build and cache kernel FFTs for default params. Skipped in GA mode."""
+        """Build and cache kernel FFTs if they fit in memory.
+
+        If the full cache would exceed the memory budget, emits a
+        ResourceWarning and leaves self._kernel_ffts as None — the signal
+        to compute_device that the streaming path should be used instead.
+        """
         if self._kernel_ffts is not None:
             return
 
         xp = self.xp
-        kernels = self._build_all_kernels(self._T, self._F, decoded_params)
-        self._kernel_ffts = xp.fft.fft2(
-            kernels, s=self._pad_shape, axes=(-2, -1)
-        ).astype(self.complex_dtype)
-        del kernels  # free raw kernels, only FFTs needed
+        K = self._n_kernels
 
-        # Memory check
-        free_after = get_available_memory(self.use_gpu)
-        cache_bytes = self._kernel_ffts.nbytes
-        if free_after < cache_bytes:
+        # Pre-allocation check: would the cache fit?
+        bytes_per_fft = (
+            self._pad_shape[0] * self._pad_shape[1]
+            * np.dtype(self.complex_dtype).itemsize
+        )
+        cache_bytes = K * bytes_per_fft
+        available = get_available_memory(self.use_gpu)
+
+        if cache_bytes > available * self._CACHE_MEMORY_BUDGET:
             warnings.warn(
-                f"Kernel FFT cache is {cache_bytes / 1e6:.0f}MB, only "
-                f"{free_after / 1e6:.0f}MB free. Consider lower resolution.",
+                f"Kernel FFT cache would need {cache_bytes / 1e9:.2f} GB; "
+                f"only {available / 1e9:.2f} GB available. Falling back to "
+                f"streaming mode — kernels rebuilt each compute() call. "
+                f"This works on any GPU but is slower than the cached path.",
                 ResourceWarning,
+                stacklevel=2,
             )
+            return  # _kernel_ffts stays None → streaming dispatch
+
+        # Cache fits. Build it in chunks so peak construction memory stays
+        # bounded (the old all-at-once fft2 would itself OOM at high N
+        # even when the final cache had room).
+        self._kernel_ffts = xp.empty(
+            (K, *self._pad_shape), dtype=self.complex_dtype,
+        )
+        for start in range(0, K, self._batch_size):
+            end = min(start + self._batch_size, K)
+            kernels_chunk = self._build_kernels_range(decoded_params, start, end)
+            self._kernel_ffts[start:end] = xp.fft.fft2(
+                kernels_chunk, s=self._pad_shape, axes=(-2, -1),
+            ).astype(self.complex_dtype)
+            del kernels_chunk
+            if self.use_gpu:
+                xp.cuda.Stream.null.synchronize()
 
     # ----- kernel construction -----------------------------------------------
 
@@ -220,27 +272,33 @@ class GaborFilterbank:
 
         return (gaussian * carrier).astype(self.complex_dtype)
 
-    def _build_all_kernels(self, T, F, decoded_params):
-        """Build all Gabor kernels and stack into [n_kernels x n_time x n_freq]."""
+    def _build_kernels_range(self, decoded_params, start: int, end: int):
+        """Build kernels [start:end) in flat (rate, scale) ordering.
+
+        Used by both the cached build (loops over the full range in chunks)
+        and the streaming compute (builds one chunk per outer iteration).
+        """
         xp = self.xp
         kernels = []
-        for i, omega in enumerate(self.rates):
-            for j, Omega in enumerate(self.scales):
-                k_idx = i * self._n_scales + j
-                sigma_t_mult, sigma_f_mult, theta, alpha = decoded_params[k_idx]
-                kernel = self._create_gabor_filter(
-                    omega, Omega, T, F, sigma_t_mult, sigma_f_mult, theta, alpha
-                )
-                kernels.append(kernel)
+        for k_idx in range(start, end):
+            i = k_idx // self._n_scales
+            j = k_idx % self._n_scales
+            omega = self.rates[i]
+            Omega = self.scales[j]
+            sigma_t_mult, sigma_f_mult, theta, alpha = decoded_params[k_idx]
+            kernel = self._create_gabor_filter(
+                omega, Omega, self._T, self._F,
+                sigma_t_mult, sigma_f_mult, theta, alpha,
+            )
+            kernels.append(kernel)
         return xp.stack(kernels)
 
     # ----- hot path ----------------------------------------------------------
 
     def _apply_filters_batched(self, spec_fft, kernel_ffts):
         """
-        Apply all filters using batched tensor operations.
-
-        Uses cached shape state (pad_shape, crop offsets, frame indices, batch size).
+        Apply all filters using batched tensor operations with a pre-built
+        kernel FFT cache.
 
         Args:
             spec_fft: FFT of input spectrogram [pad_time x pad_freq]
@@ -265,8 +323,58 @@ class GaborFilterbank:
             filtered = xp.abs(filtered_full[:, ct : ct + n_time, cf : cf + n_freq])
             rsf_flat[start:end] = filtered[:, self._frame_indices, :].mean(axis=2)
 
-            # Sync between batches so GPU frees intermediate memory before next batch (prevents memory pool congestion)
-            if self.use_gpu and end < K:
+            if self.use_gpu:
+                xp.cuda.Stream.null.synchronize()
+
+        rsf_data = rsf_flat.reshape(self._n_rates, self._n_scales, self._n_frames, n_freq)
+        return rsf_data.transpose(2, 0, 1, 3)
+
+    def _apply_filters_streaming(self, spec_fft, decoded_params):
+        """
+        Apply filters by building kernels inline per-chunk (no full cache).
+
+        Same structure as _apply_filters_batched, but each iteration
+        constructs and FFTs its own slice of the kernel bank instead of
+        indexing a prebuilt cache. Peak memory is one chunk's worth of
+        kernels regardless of n_kernels, so this path works at any
+        resolution given enough patience.
+
+        Args:
+            spec_fft: FFT of input spectrogram [pad_time x pad_freq]
+            decoded_params: Per-kernel parameter array [n_kernels x 4]
+
+        Returns:
+            RSF data [n_frames x n_rates x n_scales x n_freq]
+        """
+        xp = self.xp
+        n_time = self._cached_shape[0]
+        n_freq = self._cached_shape[1]
+        ct, cf = self._crop_t, self._crop_f
+        K = self._n_kernels
+
+        rsf_flat = xp.zeros((K, self._n_frames, n_freq), dtype=self.float_dtype)
+
+        for start in range(0, K, self._batch_size):
+            end = min(start + self._batch_size, K)
+
+            # Build + FFT this chunk's kernels (the difference vs cached path)
+            kernels_chunk = self._build_kernels_range(decoded_params, start, end)
+            kernel_ffts_chunk = xp.fft.fft2(
+                kernels_chunk, s=self._pad_shape, axes=(-2, -1),
+            ).astype(self.complex_dtype)
+            del kernels_chunk
+
+            # Same convolution + integration as the cached path
+            filtered_fft = kernel_ffts_chunk * spec_fft[None, :, :]
+            del kernel_ffts_chunk
+            filtered_full = xp.fft.ifft2(filtered_fft, s=self._pad_shape, axes=(-2, -1))
+            del filtered_fft
+            filtered = xp.abs(filtered_full[:, ct : ct + n_time, cf : cf + n_freq])
+            del filtered_full
+            rsf_flat[start:end] = filtered[:, self._frame_indices, :].mean(axis=2)
+            del filtered
+
+            if self.use_gpu:
                 xp.cuda.Stream.null.synchronize()
 
         rsf_data = rsf_flat.reshape(self._n_rates, self._n_scales, self._n_frames, n_freq)
@@ -291,11 +399,16 @@ class GaborFilterbank:
         """
         Hot path. Process spectrogram on device, return RSF on device.
 
+        Memory-adaptive dispatch:
+          - Default mode (params=None): try to cache kernel FFTs. If they
+            fit, use the batched cached path. If not, fall back to streaming.
+          - GA mode (params given): always stream. Kernels change per call,
+            so caching has no benefit, and this avoids GA's own OOM risk at
+            high resolution.
+
         Args:
             spec_device: Device array (numpy or cupy) of shape (n_time, n_freq)
             params: Optional filter parameter indices [n_filters x 4].
-                    None = use defaults (kernel FFTs are cached).
-                    Provided = GA mode (kernels rebuilt, shape caches reused).
 
         Returns:
             Device array of shape (n_frames, n_rates, n_scales, n_freq)
@@ -303,27 +416,19 @@ class GaborFilterbank:
         xp = self.xp
         n_time, n_freq = spec_device.shape
 
-        # Ensure shape-dependent caches are current
         self._ensure_shape_cache(n_time, n_freq)
-
-        # The one per-call FFT (input data changes every call)
         spec_fft = xp.fft.fft2(spec_device, s=self._pad_shape)
 
         if params is None:
-            # Default mode: cache kernel FFTs
             decoded = self._decode_params(self._get_default_params())
             self._ensure_kernel_cache(decoded)
-            kernel_ffts = self._kernel_ffts
-        else:
-            # GA mode: rebuild kernels fresh (shape caches still reused)
-            decoded = self._decode_params(params)
-            kernels = self._build_all_kernels(self._T, self._F, decoded)
-            kernel_ffts = xp.fft.fft2(
-                kernels, s=self._pad_shape, axes=(-2, -1)
-            ).astype(self.complex_dtype)
-            del kernels
+            if self._kernel_ffts is not None:
+                return self._apply_filters_batched(spec_fft, self._kernel_ffts)
+            return self._apply_filters_streaming(spec_fft, decoded)
 
-        return self._apply_filters_batched(spec_fft, kernel_ffts)
+        # GA mode: always stream
+        decoded = self._decode_params(params)
+        return self._apply_filters_streaming(spec_fft, decoded)
 
     def compute(
         self,
