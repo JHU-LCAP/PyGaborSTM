@@ -31,6 +31,12 @@ class Config:
         spectrogram.
     frmlen_ms : float, default 16.0
         Spectrogram frame length in ms (downsampling factor after y5).
+    filter_order : int, default 4
+        Number of biquad cascades per gammatone filter. Higher values
+        produce sharper filters at proportionally higher cost.
+    erb_scale : float, default 0.6
+        Multiplier on the Glasberg-Moore ERB bandwidth. Values below
+        1.0 narrow the filters; 0.6 matches the NSL toolbox default.
     rates : np.ndarray, default ``STANDARD_RATES``
         Base set of temporal modulation rates (Hz). Used as anchor points;
         ``resolution`` may interpolate additional rates between them.
@@ -56,6 +62,10 @@ class Config:
     octaves: float = 5.3
     tau_ms: float = 8.0
     frmlen_ms: float = 16.0
+
+    # Gammatone
+    filter_order: int = 4
+    erb_scale: float = 0.6
 
     # RSF / Gabor
     rates: np.ndarray = field(default_factory=lambda: STANDARD_RATES.copy())
