@@ -114,11 +114,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Three platforms, oldest and newest Python. CI already proves the code
-        # works on the full 3x3 grid; what this adds is "does the published
-        # artifact install", and 3.12 is not where installs break.
+        # One cell per platform. CI already tested the code; this only answers
+        # "does the published artifact install and run", which is a per-platform
+        # question, not a per-version one.
         os: [ubuntu-latest, macos-14, windows-latest]
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
         with:

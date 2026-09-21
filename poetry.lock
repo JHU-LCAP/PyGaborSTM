@@ -4828,7 +4828,6 @@ test = ["big-O", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more_it
 type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 
 [extras]
-all = ["matplotlib", "seaborn"]
 cuda12 = ["cupy-cuda12x"]
 cuda13 = ["cupy-cuda13x"]
 viz = ["matplotlib", "seaborn"]
@@ -4836,4 +4835,4 @@ viz = ["matplotlib", "seaborn"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "e156bb7583c4a80c04cc0f884dc9f257272cbf6826668a2f74958aa09f20e00d"
+content-hash = "e27430dc9c106e65fc5198ff40f2ff37bc054eb1e2ecf6195646827ace289a5e"
