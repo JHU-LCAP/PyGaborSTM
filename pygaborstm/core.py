@@ -48,6 +48,15 @@ class PyGaborSTM:
         self._spec_model = AuditorySpectrogram(self.config)
         self._gabor_model = GaborFilterbank(self.config)
 
+    @property
+    def device(self):
+        """The backend actually in use.
+
+        ``config.use_gpu`` is the request; this is the answer. Check
+        ``model.device.on_gpu`` to confirm a GPU request took effect.
+        """
+        return self._spec_model.device
+
     def spectrogram(self, audio: np.ndarray) -> Spectrogram:
         """Compute the auditory spectrogram and return it on host.
 
