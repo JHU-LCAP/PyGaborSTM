@@ -1,10 +1,14 @@
+import inspect
 import pickle
+import re
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import pygaborstm as stm
 from pygaborstm import backend
+from pygaborstm.gabor import GaborFilterbank
 from pygaborstm.structs import RSF, Spectrogram
 
 
@@ -164,3 +168,27 @@ class TestPickle:
         restored = pickle.loads(pickle.dumps(model))
 
         np.testing.assert_array_equal(restored.compute(audio_tone).data, expected.data)
+
+    def test_device_caches_are_dropped_not_carried(self, audio_tone):
+        model = stm.PyGaborSTM()
+        model.compute(audio_tone)
+
+        state = model._gabor_model.__getstate__()
+
+        assert state["_cached_shape"] is None
+        for attr in GaborFilterbank._DEVICE_CACHE_ATTRS:
+            assert state[attr] is None, f"{attr} would be pickled as a device array"
+
+    def test_every_device_array_attribute_is_declared(self):
+        # Guards the list above: anything newly assigned from the array module
+        # is device-resident under CuPy and must be dropped on pickle.
+        source = Path(inspect.getfile(GaborFilterbank)).read_text()
+        assigned = set()
+        for line in source.splitlines():
+            match = re.match(r"\s*(self\._\w+(?:,\s*self\._\w+)*)\s*=\s*xp\.", line)
+            if match:
+                assigned.update(re.findall(r"self\.(_\w+)", match.group(1)))
+
+        assert assigned, "regex found nothing; the guard would silently pass"
+        undeclared = assigned - set(GaborFilterbank._DEVICE_CACHE_ATTRS)
+        assert not undeclared, f"not dropped on pickle: {sorted(undeclared)}"

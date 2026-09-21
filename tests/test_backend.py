@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pytest
 
@@ -51,6 +53,25 @@ class TestAvailableMemory:
         mem = backend.get_available_memory(use_gpu=False)
         assert isinstance(mem, int)
         assert mem > 0
+
+    def test_without_procfs_falls_back(self, monkeypatch):
+        # /proc/meminfo does not exist on macOS or Windows, so this is the
+        # path those platforms always take.
+        def no_procfs(*args, **kwargs):
+            raise FileNotFoundError("/proc/meminfo")
+
+        monkeypatch.setattr("builtins.open", no_procfs)
+        mem = backend.get_available_memory(use_gpu=False)
+        assert isinstance(mem, int)
+        assert mem > 0
+
+    def test_without_procfs_or_psutil_uses_default(self, monkeypatch):
+        def no_procfs(*args, **kwargs):
+            raise FileNotFoundError("/proc/meminfo")
+
+        monkeypatch.setattr("builtins.open", no_procfs)
+        monkeypatch.setitem(sys.modules, "psutil", None)
+        assert backend.get_available_memory(use_gpu=False) == 4 * 1024**3
 
 
 class TestToNumpy:

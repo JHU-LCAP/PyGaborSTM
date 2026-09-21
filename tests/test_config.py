@@ -81,6 +81,10 @@ class TestValidation:
         with pytest.raises(ValueError, match="entirely NaN"):
             Config(rsf_frame_size_ms=5, frmlen_ms=16)
 
+    def test_frame_shorter_than_one_sample_rejected(self):
+        with pytest.raises(ValueError, match="samples per frame"):
+            Config(frmlen_ms=0.01, sample_rate=8000, octaves=4.0)
+
     def test_invalid_resolution_rejected(self):
         with pytest.raises(ValueError, match="Invalid resolution"):
             Config(resolution="nope")

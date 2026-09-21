@@ -170,11 +170,15 @@ class GaborFilterbank:
         """Frame start times in seconds, using the effective hop."""
         return np.arange(n_frames) * (self.effective_frame_shift_ms / 1000.0)
 
+    #: Attributes built from the active array module. They are device-resident
+    #: under CuPy, so they are dropped on pickle and rebuilt by
+    #: _ensure_shape_cache, which reruns whenever _cached_shape is None.
+    _DEVICE_CACHE_ATTRS = ("_T", "_F", "_frame_indices", "_kernel_ffts")
+
     def __getstate__(self) -> dict:
-        # Shape-dependent caches may hold device arrays; drop and rebuild.
         state = self.__dict__.copy()
-        state["_frame_indices"] = None
-        state["_kernel_ffts"] = None
+        for key in self._DEVICE_CACHE_ATTRS:
+            state[key] = None
         state["_cached_shape"] = None
         return state
 
