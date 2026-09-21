@@ -1,0 +1,58 @@
+cff-version: 1.2.0
+title: PyGaborSTM
+message: >-
+  If you use this software, please cite it, and also cite the auditory
+  model it implements (Chi, Ru & Shamma 2005) and the Gabor filterbank
+  formulation (Bellur & Elhilali 2017), listed under references.
+type: software
+authors:
+  - name: >-
+      Johns Hopkins University, Laboratory for Computational Audio
+      Perception
+repository-code: https://github.com/JHU-LCAP/PyGaborSTM
+url: https://pygaborstm.readthedocs.io/
+abstract: >-
+  Rate-Scale-Frequency (RSF) representations from audio via a
+  bio-inspired auditory spectrogram followed by a 2D Gabor filterbank.
+keywords:
+  - audio
+  - auditory model
+  - spectro-temporal modulation
+  - Gabor filterbank
+  - cochlear model
+license: MIT
+version: 0.1.0
+references:
+  - type: article
+    title: Multiresolution spectrotemporal analysis of complex sounds
+    authors:
+      - family-names: Chi
+        given-names: Taishih
+      - family-names: Ru
+        given-names: Powen
+      - family-names: Shamma
+        given-names: Shihab A.
+    journal: The Journal of the Acoustical Society of America
+    volume: 118
+    issue: 2
+    start: 887
+    end: 906
+    year: 2005
+    doi: 10.1121/1.1945807
+  - type: article
+    title: >-
+      Feedback-driven sensory mapping adaptation for robust speech
+      activity detection
+    authors:
+      - family-names: Bellur
+        given-names: Ashwin
+      - family-names: Elhilali
+        given-names: Mounya
+    journal: >-
+      IEEE/ACM Transactions on Audio, Speech, and Language Processing
+    volume: 25
+    issue: 3
+    start: 481
+    end: 492
+    year: 2017
+    doi: 10.1109/TASLP.2016.2639322

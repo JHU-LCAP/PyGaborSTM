@@ -1,5 +1,18 @@
 # PyGaborSTM
+
+[![PyPI](https://img.shields.io/pypi/v/pygaborstm)](https://pypi.org/project/pygaborstm/)
+[![Python](https://img.shields.io/pypi/pyversions/pygaborstm)](https://pypi.org/project/pygaborstm/)
+[![CI](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml/badge.svg)](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml)
+[![Docs](https://readthedocs.org/projects/pygaborstm/badge/?version=latest)](https://pygaborstm.readthedocs.io/en/latest/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) representations from audio signals using bio-inspired auditory spectrograms and 2D Gabor filterbanks. Documentation can be found [here](https://pygaborstm.readthedocs.io/en/latest/).
+
+The project is `PyGaborSTM`; the package you install and import is lowercase
+`pygaborstm`.
+
+> **Status:** 0.1.0, a first public release. The API may still change in
+> backwards-incompatible ways before 1.0.
 
 ## Installation
 
@@ -79,6 +92,20 @@ stm.plot.plt_rsf(rsf, fold=True)  # Symmetric folding
 
 See `notebooks/example_usage.ipynb` for more examples.
 
+### Notebooks and their audio
+
+The notebooks are not self-contained: `data/` and `notebooks/assets/` are
+gitignored, so the audio they read is absent from a fresh clone.
+
+- `chi2005_validation.ipynb` regenerates most of its own stimuli, so it runs
+  after executing its generation cell.
+- `example_usage.ipynb` and `benchmark.ipynb` need audio you supply; point them
+  at any mono file.
+- `chi99_validation.ipynb` and `mvripfft_validation.ipynb` need the ripple set,
+  which `notebooks/nb_utils/audio_generator.py:generate_ripple_set` produces.
+  Note the default rates there are narrower than the set `chi99_validation`
+  expects, so it reproduces the method rather than the exact figure.
+
 ## Configuration
 ```python
 config = stm.Config(
@@ -142,5 +169,17 @@ poetry env info --path
 poetry run python -m ipykernel install --user --name pygaborstm
 ```
 
+## Citing
+
+If you use PyGaborSTM in published work, please cite the software (see
+`CITATION.cff`, or the "Cite this repository" button on GitHub) along with the
+papers it implements.
+
 ## References
-- Bellur, A., & Elhilali, M. (2017). Feedback-driven sensory mapping adaptation for robust speech activity detection. *IEEE/ACM Transactions on Audio, Speech, and Language Processing*, 25(3), 481-492.
+- Chi, T., Ru, P., & Shamma, S. A. (2005). Multiresolution spectrotemporal analysis of complex sounds. *The Journal of the Acoustical Society of America*, 118(2), 887-906. [doi:10.1121/1.1945807](https://doi.org/10.1121/1.1945807)
+
+  The auditory spectrogram model implemented here.
+
+- Bellur, A., & Elhilali, M. (2017). Feedback-driven sensory mapping adaptation for robust speech activity detection. *IEEE/ACM Transactions on Audio, Speech, and Language Processing*, 25(3), 481-492. [doi:10.1109/TASLP.2016.2639322](https://doi.org/10.1109/TASLP.2016.2639322)
+
+  The Gabor filterbank formulation used for the RSF stage.
