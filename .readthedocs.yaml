@@ -1,9 +1,9 @@
 # Read the Docs build configuration.
 # See https://docs.readthedocs.io/en/stable/config-file/v2.html
 #
-# Uses pip (not poetry) because RTD's poetry support is fragile and
-# pyproject.toml here pins cupy-cuda13x, which can't install on RTD.
-# docs/requirements.txt mirrors the pieces docs actually need.
+# Installs the package itself with its `viz` extra, because mkdocstrings
+# resolves pygaborstm.plot and pygaborstm.analysis, which need matplotlib.
+# Doc tooling stays in docs/requirements.txt.
 
 version: 2
 
@@ -18,4 +18,8 @@ mkdocs:
 
 python:
   install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - viz
     - requirements: docs/requirements.txt

@@ -173,11 +173,14 @@ def get_available_memory(use_gpu: bool = False) -> int:
     except (OSError, ValueError, IndexError):
         pass
 
+    # Best effort only: psutil is absent on a minimal install and can fail
+    # outright in restricted containers. A wrong number here costs some
+    # batching efficiency; an exception would kill the pipeline.
     try:
         import psutil
 
-        return psutil.virtual_memory().available
-    except ImportError:
+        return int(psutil.virtual_memory().available)
+    except Exception:
         pass
 
     return 4 * 1024**3

@@ -8,6 +8,8 @@ Gabor filterbank tuning against Chi, Ru & Shamma (1999).
 import numpy as np
 import matplotlib.pyplot as plt
 
+from ._optional import require
+
 
 def compute_matched_filter_mtf(rsf_dict: dict) -> dict:
     """
@@ -168,7 +170,7 @@ def plot_mtf_heatmap(
     annot: bool = True,
 ) -> tuple:
     """Plot matched filter MTF as heatmaps using seaborn."""
-    import seaborn as sns
+    sns = require("seaborn", extra="viz", feature="plot_mtf_heatmap()")
 
     d = _get_plot_data(rsf_dict, normalize)
     fmt = (

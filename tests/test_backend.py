@@ -54,7 +54,7 @@ class TestAvailableMemory:
         assert isinstance(mem, int)
         assert mem > 0
 
-    def test_without_procfs_falls_back(self, monkeypatch):
+    def test_without_procfs_still_returns_a_number(self, monkeypatch):
         # /proc/meminfo does not exist on macOS or Windows, so this is the
         # path those platforms always take.
         def no_procfs(*args, **kwargs):
@@ -71,6 +71,21 @@ class TestAvailableMemory:
 
         monkeypatch.setattr("builtins.open", no_procfs)
         monkeypatch.setitem(sys.modules, "psutil", None)
+        assert backend.get_available_memory(use_gpu=False) == 4 * 1024**3
+
+    def test_never_raises_when_psutil_itself_fails(self, monkeypatch):
+        # psutil reads /proc on Linux and can fail in restricted containers.
+        # The probe is advisory, so it must degrade rather than propagate.
+        class BrokenPsutil:
+            @staticmethod
+            def virtual_memory():
+                raise PermissionError("denied")
+
+        def no_procfs(*args, **kwargs):
+            raise FileNotFoundError("/proc/meminfo")
+
+        monkeypatch.setattr("builtins.open", no_procfs)
+        monkeypatch.setitem(sys.modules, "psutil", BrokenPsutil)
         assert backend.get_available_memory(use_gpu=False) == 4 * 1024**3
 
 

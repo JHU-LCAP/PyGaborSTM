@@ -6,7 +6,37 @@ PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) represe
 ```bash
 pip install pygaborstm
 ```
-For now, install from source (see below).
+
+This is the CPU install and works on macOS, Linux and Windows. It pulls only
+NumPy, SciPy and psutil.
+
+Plotting (`pygaborstm.plot` and `pygaborstm.analysis`) needs matplotlib, which
+is an extra so the core install stays small:
+
+```bash
+pip install 'pygaborstm[viz]'
+```
+
+### GPU (optional, NVIDIA only)
+Pick the extra matching your CUDA version, which `nvidia-smi` reports:
+
+```bash
+pip install 'pygaborstm[cuda12]'   # CUDA 12.x
+pip install 'pygaborstm[cuda13]'   # CUDA 13.x
+```
+
+Install only one: both provide the `cupy` module. CuPy has no macOS wheels, so
+on macOS these extras install nothing and the library runs on CPU.
+
+Then set `use_gpu=True`:
+
+```python
+model = stm.PyGaborSTM(stm.Config(use_gpu=True))
+```
+
+If CuPy is missing or no CUDA device is present, the library warns and falls
+back to NumPy rather than failing. Check what it actually resolved with
+`model.device.on_gpu`.
 
 ### From source
 ```bash
@@ -15,37 +45,17 @@ cd PyGaborSTM
 poetry install
 ```
 
-### GPU Support (Optional, Linux/Windows only)
-For GPU acceleration, you need:
+### CUDA Toolkit
+The CuPy wheels bundle the CUDA runtime, so a separate toolkit install is only
+needed if you want `nvcc` and the profiling tools.
 
-1. **NVIDIA GPU** with CUDA support
-2. **CUDA Toolkit** installed on your system
-
-```bash
-# Check your CUDA version
-nvidia-smi
-```
-
-Download and install the CUDA Toolkit from NVIDIA:
-https://developer.nvidia.com/cuda-toolkit
-
-After installation, add to your `~/.bashrc` or `~/.zshrc`:
+Get it from https://developer.nvidia.com/cuda-toolkit, then add to your shell
+profile:
 
 ```bash
 export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ```
-
-Verify installation:
-
-```bash
-nvcc --version
-```
-
-The library uses CuPy for GPU acceleration. Make sure your CuPy version matches your CUDA version:
-- CUDA 11.x → `cupy-cuda11x`
-- CUDA 12.x → `cupy-cuda12x`
-- CUDA 13.x → `cupy-cuda13x`
 
 ## Quick Start
 ```python
@@ -96,9 +106,10 @@ PyGaborSTM/
 │   ├── spectrogram.py   # AuditorySpectrogram
 │   ├── gabor.py         # GaborFilterbank
 │   ├── core.py          # PyGaborSTM class
-│   ├── plot.py          # Plotting functions
-│   ├── analysis.py      # MTF analysis helpers
-│   ├── backend.py       # NumPy/CuPy switching
+│   ├── plot.py          # Plotting functions (needs [viz])
+│   ├── analysis.py      # MTF analysis helpers (needs [viz])
+│   ├── backend.py       # Device resolution, NumPy/CuPy switching
+│   ├── _optional.py     # Optional-dependency errors
 │   └── gammatone_kernel.py  # Custom CUDA SOS kernel
 ├── notebooks/
 └── tests/
