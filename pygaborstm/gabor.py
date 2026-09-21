@@ -16,18 +16,17 @@ any GPU, including lower-memory devices like the Jetson Orin Nano.
 """
 
 import warnings
-import numpy as np
-from typing import Tuple
 
-from .config import Config
-from .constants import RESOLUTION_MULTIPLIERS
-from .structs import Spectrogram, RSF
+import numpy as np
+
 from .backend import (
+    get_dtypes,
     resolve_device,
     to_numpy,
-    get_dtypes,
 )
-
+from .config import Config
+from .constants import RESOLUTION_MULTIPLIERS
+from .structs import RSF, Spectrogram
 
 PARAM_OPTIONS = {
     "sigma_t": np.array(
@@ -188,7 +187,7 @@ class GaborFilterbank:
 
     # ----- rates/scales (config-dependent, computed at init) ------------------
 
-    def _get_rates_scales(self, cfg: Config) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_rates_scales(self, cfg: Config) -> tuple[np.ndarray, np.ndarray]:
         cfg_rates = np.asarray(cfg.rates, dtype=np.float64)
         cfg_scales = np.asarray(cfg.scales, dtype=np.float64)
 

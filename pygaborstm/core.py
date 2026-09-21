@@ -6,11 +6,11 @@ single object so users don't have to manage the two stages by hand.
 
 import numpy as np
 
-from .config import Config
-from .spectrogram import AuditorySpectrogram
-from .gabor import GaborFilterbank
-from .structs import Spectrogram, RSF
 from .backend import to_numpy
+from .config import Config
+from .gabor import GaborFilterbank
+from .spectrogram import AuditorySpectrogram
+from .structs import RSF, Spectrogram
 
 
 class PyGaborSTM:

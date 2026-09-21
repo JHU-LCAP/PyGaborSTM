@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pygaborstm as stm
-from pygaborstm.gabor import GaborFilterbank, DEFAULT_PARAM_IDX
+from pygaborstm.gabor import DEFAULT_PARAM_IDX, GaborFilterbank
 from pygaborstm.structs import RSF
 
 

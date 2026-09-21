@@ -109,8 +109,24 @@ include = [{ path = "pygaborstm/py.typed", format = ["sdist", "wheel"] }]
 [tool.ruff]
 target-version = "py311"
 
+[tool.ruff.lint]
+# Selected explicitly. Relying on ruff's implicit defaults is what let this
+# gate drift: the default set grows between releases, so a tree that is clean
+# today fails on a release nobody asked for.
+select = ["E", "F", "W", "I", "UP", "B", "C4", "RUF"]
+ignore = ["E501"]  # line length is the formatter's job
+
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["E402"]
+# RUF001-003 flag "ambiguous" unicode. Here that is sigma, alpha and the
+# multiplication sign in Gabor documentation, which is the correct notation for
+# the domain. Ignored per file rather than globally so genuinely ambiguous
+# characters elsewhere are still caught.
+"pygaborstm/gabor.py" = ["RUF001", "RUF002"]
+"notebooks/nb_utils/audio_generator.py" = ["RUF001", "RUF002"]
+"notebooks/*_validation.ipynb" = ["E402", "RUF003"]
+"notebooks/benchmark.ipynb" = ["E402", "RUF001"]
+"tests/test_structs.py" = ["RUF003"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -7,13 +7,11 @@ rate split, etc.) so notebook code can stay short.
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict
-
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.axes import Axes
 
-from .structs import Spectrogram, RSF
+from .structs import RSF, Spectrogram
 
 #: Backends that render to a file and cannot display a window. Calling
 #: plt.show() on these is a no-op that emits a warning.
@@ -60,7 +58,7 @@ def plt_spectrogram(
     figsize: tuple = (12, 6),
     cmap: str = "viridis",
     frmlen_ms: float = 16.0,
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     show_colorbar: bool = True,
     title_fontsize: int = 12,
     label_fontsize: int = 10,
@@ -102,7 +100,7 @@ def plt_spectrogram(
     """
     # Create figure if no ax provided
     if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
+        _fig, ax = plt.subplots(figsize=figsize)
         standalone = True
     else:
         standalone = False
@@ -150,13 +148,13 @@ def plt_spectrogram(
 
 
 def plt_spectrogram_grid(
-    data: List[Dict],
+    data: list[dict],
     n_cols: int = 4,
     figsize: tuple | None = None,
     cmap: str = "viridis",
     frmlen_ms: float = 16.0,
     suptitle: str | None = None,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> None:
     """Plot multiple spectrograms in a grid.
 
@@ -239,7 +237,7 @@ def plt_rsf(
     title: str = "Rate-Scale Representation",
     figsize: tuple = (10, 8),
     cmap: str = "viridis",
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     show_colorbar: bool = True,
     title_fontsize: int = 12,
     label_fontsize: int = 10,
@@ -314,7 +312,7 @@ def plt_rsf(
 
     # Create figure if no ax provided
     if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
+        _fig, ax = plt.subplots(figsize=figsize)
         standalone = True
     else:
         standalone = False
@@ -391,7 +389,7 @@ def plt_rsf(
 
 
 def plt_rsf_grid(
-    data: List[Dict],
+    data: list[dict],
     rates: np.ndarray | None = None,
     scales: np.ndarray | None = None,
     fold: bool = False,
@@ -399,7 +397,7 @@ def plt_rsf_grid(
     figsize: tuple | None = None,
     cmap: str = "viridis",
     suptitle: str | None = None,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> None:
     """Plot multiple RSF representations in a grid.
 

@@ -7,8 +7,8 @@ Gabor filterbank tuning against Chi, Ru & Shamma (1999).
 
 import warnings
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 from ._optional import require
 

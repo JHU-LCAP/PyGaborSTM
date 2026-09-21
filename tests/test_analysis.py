@@ -28,7 +28,7 @@ class TestComputeMatchedFilterMTF:
             stm.analysis.compute_matched_filter_mtf({})
 
     def test_key_off_the_grid_names_the_value(self, rsf_from_tone):
-        with pytest.raises(ValueError, match="rate 3.3 is not present"):
+        with pytest.raises(ValueError, match=r"rate 3\.3 is not present"):
             stm.analysis.compute_matched_filter_mtf({(3.3, 0.7): rsf_from_tone})
 
     def test_partial_dict_warns_about_zeros(self, rsf_from_tone):

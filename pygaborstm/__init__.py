@@ -37,7 +37,8 @@ Examples
 from __future__ import annotations
 
 from importlib import import_module
-from importlib.metadata import PackageNotFoundError, version as _dist_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _dist_version
 from types import ModuleType
 from typing import TYPE_CHECKING
 
@@ -60,7 +61,7 @@ except PackageNotFoundError:  # source tree that was never installed
 #: `import pygaborstm` costs numpy and scipy and nothing else.
 _LAZY_SUBMODULES = frozenset({"plot", "analysis"})
 
-__all__ = [
+__all__ = [  # noqa: RUF022 - grouped by meaning, not alphabetised
     # Main class
     "PyGaborSTM",
     # Config

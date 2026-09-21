@@ -14,13 +14,13 @@ Pipeline:
 
 import numpy as np
 
-from .config import Config
-from .structs import Spectrogram
 from .backend import (
+    get_dtypes,
     resolve_device,
     to_numpy,
-    get_dtypes,
 )
+from .config import Config
+from .structs import Spectrogram
 
 # Optional GPU fast path for the y1 stage. A single CUDA kernel launch
 # runs all SOS cascades in parallel, replacing the per-channel sosfilt
@@ -29,6 +29,8 @@ from .backend import (
 try:
     from .gammatone_kernel import (
         batched_sosfilt as _batched_sosfilt_impl,
+    )
+    from .gammatone_kernel import (
         is_available as _kernel_is_available,
     )
 except ImportError:
@@ -167,7 +169,9 @@ class AuditorySpectrogram:
         B = 1.019 * 2 * np.pi * ERB
 
         sos_list = []
-        for fc, bw in zip(self.center_freqs, B):
+        # strict: B is derived elementwise from center_freqs, so a length
+        # mismatch would mean the filter bank is malformed, not truncatable.
+        for fc, bw in zip(self.center_freqs, B, strict=True):
             omega = 2 * np.pi * fc
             r = np.exp(-bw * T)
             theta = omega * T

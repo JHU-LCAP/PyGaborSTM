@@ -41,7 +41,7 @@ class TestLazySubmodules:
 
     def test_unknown_attribute_raises_attribute_error(self):
         with pytest.raises(AttributeError, match="no attribute 'nope'"):
-            stm.nope
+            stm.nope  # noqa: B018 - the bare access is what raises
 
     def test_missing_extra_names_the_install_command(self):
         # Simulate matplotlib being absent, as on a bare `pip install`.

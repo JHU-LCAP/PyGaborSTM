@@ -1,6 +1,7 @@
 """Data classes for spectrogram and RSF representations."""
 
 from dataclasses import dataclass
+
 import numpy as np
 
 
