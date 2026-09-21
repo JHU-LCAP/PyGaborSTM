@@ -182,7 +182,9 @@ class TestPickle:
     def test_every_device_array_attribute_is_declared(self):
         # Guards the list above: anything newly assigned from the array module
         # is device-resident under CuPy and must be dropped on pickle.
-        source = Path(inspect.getfile(GaborFilterbank)).read_text()
+        # encoding is explicit: the default is cp1252 on Windows and the
+        # source contains non-ASCII maths symbols.
+        source = Path(inspect.getfile(GaborFilterbank)).read_text(encoding="utf-8")
         assigned = set()
         for line in source.splitlines():
             match = re.match(r"\s*(self\._\w+(?:,\s*self\._\w+)*)\s*=\s*xp\.", line)

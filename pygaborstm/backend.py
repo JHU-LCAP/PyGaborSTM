@@ -166,7 +166,7 @@ def get_available_memory(use_gpu: bool = False) -> int:
             pass
 
     try:
-        with open("/proc/meminfo") as f:
+        with open("/proc/meminfo", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("MemAvailable:"):
                     return int(line.split()[1]) * 1024
