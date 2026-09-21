@@ -59,3 +59,51 @@ class TestToNumpy:
         result = backend.to_numpy(arr)
         assert isinstance(result, np.ndarray)
         np.testing.assert_array_equal(result, arr)
+
+
+class TestResolveDevice:
+    def test_cpu_request_resolves_to_cpu(self):
+        dev = backend.resolve_device(use_gpu=False)
+        assert dev.on_gpu is False
+        assert dev.xp is np
+
+    def test_gpu_request_without_cupy_resolves_to_cpu(self, monkeypatch):
+        monkeypatch.setattr(backend, "CUPY_AVAILABLE", False)
+        with pytest.warns(UserWarning, match="CuPy not available"):
+            dev = backend.resolve_device(use_gpu=True)
+        assert dev.on_gpu is False
+        assert dev.xp is np
+
+    def test_cupy_present_but_no_device_resolves_to_cpu(self, monkeypatch):
+        # CuPy wheels install on any Linux/Windows box; importability is not
+        # proof of a usable GPU.
+        monkeypatch.setattr(backend, "CUPY_AVAILABLE", True)
+        monkeypatch.setattr(backend, "_cuda_device_present", lambda: False)
+        monkeypatch.setattr(backend, "_DEVICE_PROBE_ERROR", "no CUDA devices reported")
+        with pytest.warns(UserWarning, match="no usable CUDA device"):
+            dev = backend.resolve_device(use_gpu=True)
+        assert dev.on_gpu is False
+        assert dev.xp is np
+
+    def test_device_probe_swallows_runtime_errors(self, monkeypatch):
+        class FakeRuntime:
+            @staticmethod
+            def getDeviceCount():
+                raise RuntimeError("cudaErrorNoDevice")
+
+        fake_cp = type("cp", (), {"cuda": type("cuda", (), {"runtime": FakeRuntime})})
+        monkeypatch.setattr(backend, "cp", fake_cp)
+        backend._reset_device_probe()
+        try:
+            assert backend._cuda_device_present() is False
+        finally:
+            backend._reset_device_probe()
+
+    def test_synchronize_is_noop_on_cpu(self):
+        backend.resolve_device(use_gpu=False).synchronize()
+
+    def test_device_is_picklable(self):
+        import pickle
+
+        dev = backend.resolve_device(use_gpu=False)
+        assert pickle.loads(pickle.dumps(dev)) == dev

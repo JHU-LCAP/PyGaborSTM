@@ -17,10 +17,8 @@ import numpy as np
 from .config import Config
 from .structs import Spectrogram
 from .backend import (
-    get_array_module,
-    get_signal_module,
+    resolve_device,
     to_numpy,
-    next_fast_len,
     get_dtypes,
 )
 
@@ -72,6 +70,7 @@ class AuditorySpectrogram:
 
     def __init__(self, config: Config | None = None):
         cfg = config or Config()
+        cfg.validate()
 
         self.sample_rate = cfg.sample_rate
         self.n_filters = cfg.n_filters
@@ -79,10 +78,8 @@ class AuditorySpectrogram:
         self.octaves = cfg.octaves
         self.tau_ms = cfg.tau_ms
         self.frmlen_ms = cfg.frmlen_ms
-        self.use_gpu = cfg.use_gpu
-
-        self.xp = get_array_module(self.use_gpu)
-        self.signal = get_signal_module(self.use_gpu)
+        self.device = resolve_device(cfg.use_gpu)
+        self.use_gpu = self.device.on_gpu
         self.float_dtype, self.complex_dtype = get_dtypes()
 
         self.filter_order = cfg.filter_order
@@ -105,6 +102,39 @@ class AuditorySpectrogram:
         self._y5_n_fft = None
         self._y5_pad = None
 
+    @property
+    def xp(self):
+        """Active array module. Derived from :attr:`device`, never stored."""
+        return self.device.xp
+
+    @property
+    def signal(self):
+        """Active signal module. Derived from :attr:`device`, never stored."""
+        return self.device.signal
+
+    def __getstate__(self) -> dict:
+        # Device-resident arrays and the kernel handle are rebuilt on load,
+        # so a model pickled on a GPU box restores on a CPU-only one.
+        state = self.__dict__.copy()
+        for key in (
+            "_sos_device",
+            "_sos_device_f32",
+            "_batched_sosfilt",
+            "_y5_kernel_fft",
+        ):
+            state.pop(key, None)
+        state["_cached_n_samples"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self.device = resolve_device(self.use_gpu)
+        self._init_gammatone_filters()
+        self._init_y1_fast_path()
+        self._y5_kernel_fft = None
+        self._y5_n_fft = None
+        self._y5_pad = None
+
     # ----- init helpers (run once) -------------------------------------------
 
     def _create_frequency_scale(self) -> np.ndarray:
@@ -113,6 +143,16 @@ class AuditorySpectrogram:
         )
 
     def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
+        if audio.size == 0:
+            raise ValueError("audio is empty; expected at least one sample.")
+        if audio.size < self._L_frm:
+            raise ValueError(
+                f"audio has {audio.size} samples, fewer than one spectrogram "
+                f"frame ({self._L_frm} samples at frmlen_ms={self.frmlen_ms}, "
+                f"sample_rate={self.sample_rate} Hz)."
+            )
+        if not np.all(np.isfinite(audio)):
+            raise ValueError("audio contains NaN or inf.")
         audio = audio.astype(self.float_dtype)
         audio = audio - np.mean(audio)
         audio = audio / (np.max(np.abs(audio)) + 1e-10)
@@ -188,7 +228,7 @@ class AuditorySpectrogram:
 
         xp = self.xp
         n_conv = n_samples + self._tau_samples - 1
-        n_fft = next_fast_len(n_conv, self.use_gpu)
+        n_fft = self.device.next_fast_len(n_conv)
 
         kernel_device = xp.asarray(self._y5_kernel_host)
         self._y5_n_fft = n_fft

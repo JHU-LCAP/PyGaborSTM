@@ -127,12 +127,9 @@ class PyGaborSTM:
         rsf_device = self.compute_device(audio)
         rsf_data = to_numpy(rsf_device)
 
-        frame_period = self.config.rsf_frame_shift_ms / 1000.0
-        times = np.arange(rsf_data.shape[0]) * frame_period
-
         return RSF(
             data=rsf_data,
-            times=times,
+            times=self._gabor_model.frame_times(rsf_data.shape[0]),
             rates=self._gabor_model.rates,
             scales=self._gabor_model.scales,
             freqs=self._spec_model.center_freqs,

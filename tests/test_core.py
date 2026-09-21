@@ -1,7 +1,10 @@
+import pickle
+
 import numpy as np
 import pytest
 
 import pygaborstm as stm
+from pygaborstm import backend
 from pygaborstm.structs import RSF, Spectrogram
 
 
@@ -111,3 +114,53 @@ class TestFullPipeline:
 
         assert spec.n_freqs == 64
         assert rsf.n_freqs == 64
+
+
+class TestCpuFallback:
+    def test_gpu_request_without_gpu_still_computes(self, audio_tone, monkeypatch):
+        # Regression: use_gpu stayed True while xp was numpy, so the Gabor
+        # stage hit `numpy.cuda` and raised AttributeError.
+        monkeypatch.setattr(backend, "CUPY_AVAILABLE", False)
+        with pytest.warns(UserWarning, match="CuPy not available"):
+            model = stm.PyGaborSTM(stm.Config(use_gpu=True))
+
+        rsf = model.compute(audio_tone)
+
+        assert model._gabor_model.device.on_gpu is False
+        assert rsf.data.shape[1:] == (10, 6, 128)
+        assert np.isfinite(rsf.data).all()
+
+
+class TestFrameTimes:
+    def test_times_use_effective_hop_not_requested(self, audio_tone):
+        # Regression: the hop quantises to whole spectrogram frames, so the
+        # default 10 ms request becomes 16 ms, but times were labelled 10 ms
+        # and came out 1.6x short.
+        model = stm.PyGaborSTM()
+        rsf = model.compute(audio_tone)
+
+        assert model._gabor_model.effective_frame_shift_ms == 16.0
+        np.testing.assert_allclose(rsf.times[-1], (rsf.n_frames - 1) * 0.016)
+
+    def test_compute_and_rsf_agree_on_times(self, audio_tone):
+        model = stm.PyGaborSTM()
+        chained = model.compute(audio_tone)
+        staged = model.rsf(model.spectrogram(audio_tone))
+
+        np.testing.assert_array_equal(chained.times, staged.times)
+
+    def test_shift_above_frame_length_is_not_quantised(self):
+        model = stm.PyGaborSTM(stm.Config(rsf_frame_shift_ms=32, frmlen_ms=16))
+        assert model._gabor_model.effective_frame_shift_ms == 32.0
+
+
+class TestPickle:
+    def test_round_trip_after_compute_is_identical(self, audio_tone):
+        # Pickling a fresh model proves little; the caches only exist after a
+        # computation, and those are what used to hold live module objects.
+        model = stm.PyGaborSTM()
+        expected = model.compute(audio_tone)
+
+        restored = pickle.loads(pickle.dumps(model))
+
+        np.testing.assert_array_equal(restored.compute(audio_tone).data, expected.data)
