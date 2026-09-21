@@ -2,50 +2,343 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
-  pull_request:
     branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
 
 jobs:
   lint:
-    name: Lint & Format
+    name: Lint and format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install ruff
-        run: pip install ruff
+      # Read the pin from pyproject rather than repeating it here, so the gate
+      # cannot drift from what developers run. A non-'==' pin fails the job:
+      # an unpinned ruff silently adopts new default rules on release day.
+      - name: Resolve the pinned ruff version
+        id: ruff
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib, re, sys, tomllib
 
-      - name: Check formatting
-        run: ruff format --check .
+          dev = tomllib.loads(
+              pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          )["dependency-groups"]["dev"]
+          specs = [s for s in dev if re.match(r"^ruff(\W|$)", s)]
+          if len(specs) != 1:
+              sys.exit(f"expected exactly one ruff entry in dev group, got {specs}")
+          pin = re.search(r"==\s*([0-9][^\s,)]*)", specs[0])
+          if not pin:
+              sys.exit(f"ruff must be pinned with '=='; got {specs[0]!r}")
+          print(f"version={pin.group(1)}")
+          PY
 
-      - name: Check linting
-        run: ruff check .
+      - name: Install ruff ${{ steps.ruff.outputs.version }}
+        run: pip install "ruff==${{ steps.ruff.outputs.version }}"
+
+      - run: ruff format --check --diff .
+      - run: ruff check --output-format=github .
+
+  package-check:
+    name: Packaging metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install "poetry==2.2.*"
+
+      # Catches dependency-table mistakes that `python -m build` accepts
+      # silently. It reported the original broken layout without being asked.
+      - run: poetry check
+
+      # poetry.lock is committed; if it no longer matches pyproject.toml then
+      # every `poetry install` in this repo installs a fiction.
+      - run: poetry check --lock
 
   test:
-    name: Tests
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # pip, not poetry: pip resolving [project] is the path users take, and
+      # the path that was broken. The viz extra is load-bearing - without it
+      # test_plot.py and test_analysis.py importorskip themselves out and the
+      # suite reports green having tested nothing.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[viz]"
+          python -m pip install pytest pytest-cov
+
+      - run: python -m pip check
+
+      - name: Run tests
+        env:
+          MPLBACKEND: Agg
+        run: pytest -v -m "not gpu" --cov=pygaborstm --cov-report=term-missing
+
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install Poetry
-        run: pip install poetry
+      - name: Read the declared version
+        id: meta
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib, tomllib
+          data = tomllib.loads(
+              pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          )
+          print(f"version={data['project']['version']}")
+          PY
 
-      - name: Install dependencies
-        run: poetry install
+      # twine >= 6.1 is required, not preferred: the PEP 639 License-Expression
+      # field makes this Metadata-Version 2.4, which older twine rejects.
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build "twine>=6.1"
+          python -m build
 
-      - name: Run tests
-        run: poetry run pytest tests/ -v -m "not gpu" --cov=pygaborstm --cov-report=term-missing
+      - run: twine check --strict dist/*
+
+      # Every guard below consumes these exact bytes. Rebuilding per guard
+      # would mean three guards interrogating three different artifacts.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  guard-metadata:
+    name: Guard - distribution metadata
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # No checkout on purpose: nothing here may read the source tree.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Install the wheel, metadata only
+        run: pip install --no-deps dist/*.whl
+
+      - name: Runtime requirements are correctly gated
+        run: |
+          python - <<'PY'
+          import re
+          from importlib.metadata import requires
+
+          reqs = requires("pygaborstm") or []
+          print("Requires-Dist as published:")
+          for r in reqs:
+              print(f"  {r}")
+
+          def split(req):
+              head, _, marker = req.partition(";")
+              name = re.split(r"[\s(\[<>=!~]", head.strip(), maxsplit=1)[0]
+              return name.lower().replace("_", "-"), marker.strip()
+
+          parsed = [split(r) for r in reqs]
+
+          unconditional = {name for name, marker in parsed if not marker}
+          expected = {"numpy", "scipy", "psutil"}
+          if unconditional != expected:
+              raise SystemExit(
+                  f"unconditional runtime dependencies drifted\n"
+                  f"  got:      {sorted(unconditional)}\n"
+                  f"  expected: {sorted(expected)}"
+              )
+
+          # A marker of only sys_platform != darwin is NOT enough: that would
+          # install cupy for every Linux and Windows user.
+          for name, marker in parsed:
+              gated = name.startswith("cupy") or name in {"matplotlib", "seaborn"}
+              if gated and "extra ==" not in marker:
+                  raise SystemExit(f"{name} is not behind an extra; marker is {marker!r}")
+
+          print("OK: numpy/scipy/psutil unconditional; cupy and plotting extras-only")
+          PY
+
+      - name: Wheel and sdist ship py.typed and the licence
+        run: |
+          python - <<'PY'
+          import glob, tarfile, zipfile
+
+          (wheel,) = glob.glob("dist/*.whl")
+          names = zipfile.ZipFile(wheel).namelist()
+          if "pygaborstm/py.typed" not in names:
+              raise SystemExit(
+                  f"{wheel} has no py.typed, but the package advertises "
+                  f"'Typing :: Typed'; type checkers would ignore the annotations"
+              )
+          # PEP 639 puts licence files under dist-info/licenses/, not flat.
+          if not any(n.endswith(".dist-info/licenses/LICENSE") for n in names):
+              raise SystemExit(f"{wheel} has no dist-info/licenses/LICENSE")
+
+          (sdist,) = glob.glob("dist/*.tar.gz")
+          with tarfile.open(sdist) as tar:
+              members = tar.getnames()
+          for want in ("/pygaborstm/py.typed", "/LICENSE"):
+              if not any(n.endswith(want) for n in members):
+                  raise SystemExit(f"{sdist} is missing {want}")
+
+          print("OK: both artifacts ship py.typed and LICENSE")
+          PY
+
+  guard-import-weight:
+    name: Guard - import weight and lazy extras
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # Phase 1 proves the dependency table does not drag the plotting stack
+      # in, and that the failure names the extra.
+      - name: Install with no extras
+        run: pip install dist/*.whl
+
+      - name: matplotlib absent, and pygaborstm.plot says how to get it
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+
+          for mod in ("matplotlib", "seaborn"):
+              if importlib.util.find_spec(mod) is not None:
+                  raise SystemExit(f"a no-extras install pulled in {mod}")
+
+          import pygaborstm as stm
+
+          try:
+              stm.plot
+          except ImportError as exc:
+              if "pygaborstm[viz]" not in str(exc):
+                  raise SystemExit(f"error did not name the extra:\n{exc}") from None
+              print("OK: pygaborstm.plot raises an ImportError naming pygaborstm[viz]")
+          else:
+              raise SystemExit("pygaborstm.plot imported without the viz extra")
+          PY
+
+      # Phase 2 is the one that actually tests laziness. In phase 1,
+      # "matplotlib not in sys.modules" is true because matplotlib is not
+      # installed - that assertion cannot catch a regression. With the extra
+      # present, it can.
+      - name: Install the viz extra
+        run: |
+          WHEEL=$(ls dist/*.whl)
+          pip install "${WHEEL}[viz]"
+
+      - name: import pygaborstm stays lazy with matplotlib installed
+        working-directory: ${{ runner.temp }}
+        env:
+          MPLBACKEND: Agg
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+
+          if importlib.util.find_spec("matplotlib") is None:
+              raise SystemExit("the viz extra did not install matplotlib")
+
+          import pygaborstm as stm
+
+          leaked = sorted(
+              m for m in sys.modules if m.split(".")[0] in {"matplotlib", "seaborn"}
+          )
+          if leaked:
+              raise SystemExit(f"import pygaborstm eagerly imported: {leaked}")
+
+          stm.plot  # touching it is what should pay the cost
+          if "matplotlib" not in sys.modules:
+              raise SystemExit("pygaborstm.plot resolved without importing matplotlib")
+
+          print("OK: matplotlib is imported on first touch, not at import time")
+          PY
+
+  guard-fresh-install:
+    name: Guard - fresh install, run outside the repo
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Sparse checkout of scripts/ only. Even a cwd mistake cannot import
+      # ./pygaborstm/, because ./pygaborstm/ is not on disk.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - run: pip install dist/*.whl
+
+      - name: Smoke test from outside the repository
+        working-directory: ${{ runner.temp }}
+        env:
+          EXPECT_VERSION: ${{ needs.build.outputs.version }}
+          SMOKE: ${{ github.workspace }}/scripts/smoke_install.py
+        run: python "$SMOKE"
 
   docs:
     name: Docs build
@@ -53,13 +346,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      # 3.12 to match .readthedocs.yaml's build.tools.python.
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install doc requirements
-        run: pip install -r docs/requirements.txt
+      # Install exactly what Read the Docs installs, in the same order. This
+      # job previously installed only docs/requirements.txt, which is a
+      # different build from the published one, so it could not tell you
+      # whether the real docs would build.
+      - name: Install the package and doc tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[viz]"
+          python -m pip install -r docs/requirements.txt
 
-      - name: Build docs
-        run: mkdocs build --strict
+      - run: mkdocs build --strict
+
+  # One required status check for branch protection. Listing the nine matrix
+  # cells individually means adding a Python version silently stops being
+  # required.
+  ci:
+    name: CI
+    if: always()
+    needs:
+      - lint
+      - package-check
+      - test
+      - build
+      - guard-metadata
+      - guard-import-weight
+      - guard-fresh-install
+      - docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any job failed or was cancelled
+        run: |
+          echo '${{ toJSON(needs) }}'
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            exit 1
+          fi

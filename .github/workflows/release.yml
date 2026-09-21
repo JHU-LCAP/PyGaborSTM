@@ -1,0 +1,223 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Default-deny. id-token: write exists only on the two publish jobs, so no
+# other job here can mint a PyPI credential.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a release in flight: a cancellation between the TestPyPI and
+  # PyPI publishes leaves it half-published, and the version cannot be reused.
+  cancel-in-progress: false
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  build:
+    name: Build and verify the tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tag must match [project].version
+        id: meta
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, pathlib, sys, tomllib
+
+          version = tomllib.loads(
+              pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          )["project"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+
+          if tag != f"v{version}":
+              sys.exit(
+                  f"tag {tag!r} does not match [project].version {version!r}. "
+                  f"Expected 'v{version}'. Bump the version or retag; do not "
+                  f"publish a mismatch."
+              )
+          print(f"version={version}")
+          PY
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build "twine>=6.1"
+          python -m build
+
+      - run: twine check --strict dist/*
+
+      - name: Record what will be published
+        run: |
+          {
+            echo "### Artifacts for ${GITHUB_REF_NAME}"
+            echo '```'
+            sha256sum dist/*
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Built once. Both publish jobs download this artifact, so what PyPI
+      # receives is byte-identical to what was smoke-tested.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/pygaborstm/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # TestPyPI permanently reserves a filename it has seen. Without this,
+          # any failure downstream costs a version number that can never be
+          # reused. Deliberately absent on the real PyPI job below.
+          skip-existing: true
+          print-hash: true
+
+  smoke-testpypi:
+    name: Install from TestPyPI (${{ matrix.os }}, py${{ matrix.python-version }})
+    needs: [build, publish-testpypi]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        # Three platforms, oldest and newest Python. CI already proves the code
+        # works on the full 3x3 grid; what this adds is "does the published
+        # artifact install", and 3.12 is not where installs break.
+        os: [ubuntu-latest, macos-14, windows-latest]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # --extra-index-url is required: numpy, scipy and matplotlib are not on
+      # TestPyPI in usable versions, so a TestPyPI-only index cannot resolve.
+      # pip does not prefer the primary index, it unions them and takes the
+      # best version, which is why the version is pinned with ==. The retry
+      # covers TestPyPI's index cache, routinely a minute behind an upload.
+      - name: Install from TestPyPI
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5 6; do
+            if pip install --no-cache-dir \
+                 --index-url https://test.pypi.org/simple/ \
+                 --extra-index-url https://pypi.org/simple/ \
+                 "pygaborstm[viz]==${VERSION}"; then
+              exit 0
+            fi
+            echo "::notice::TestPyPI index has not caught up (attempt ${attempt}/6); retrying"
+            sleep 20
+          done
+          echo "::error::could not install pygaborstm==${VERSION} from TestPyPI"
+          exit 1
+
+      # Not from the repo root: there, ./pygaborstm/ shadows the installed
+      # distribution and this job would pass against an empty wheel. Only
+      # scripts/ is checked out, and the script itself refuses to run against
+      # a source tree.
+      - name: Smoke test the installed distribution
+        working-directory: ${{ runner.temp }}
+        env:
+          EXPECT_VERSION: ${{ needs.build.outputs.version }}
+          SMOKE: ${{ github.workspace }}/scripts/smoke_install.py
+          MPLBACKEND: Agg
+        run: python "$SMOKE"
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build, smoke-testpypi]
+    runs-on: ubuntu-latest
+    # The required-reviewer rule on this environment IS the approval gate. The
+    # workflow only names the environment; if the reviewer list is empty there
+    # is no pause and a tag publishes straight through.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pygaborstm/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Show the hashes being promoted
+        run: |
+          {
+            echo "### Promoting to PyPI"
+            echo '```'
+            sha256sum dist/*
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true
+          # No skip-existing here. A duplicate filename on real PyPI means the
+          # release logic is confused; stop rather than silently succeed.
+
+  github-release:
+    name: GitHub Release
+    needs: [build, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # --generate-notes builds the changelog from merged PRs, which is why
+      # there is no hand-maintained CHANGELOG.md in the repo.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
