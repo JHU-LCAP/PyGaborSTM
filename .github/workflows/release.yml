@@ -359,7 +359,22 @@ jobs:
               -f tag_name="${TAG}" --jq .body)
           fi
 
+          # A hand-written summary leads, if there is one. The generated PR
+          # and commit lists go underneath, collapsed: a release page that
+          # opens with every PR since the repo began describes how the repo
+          # was built, not what the release does.
+          SUMMARY=$(sed '/^<!--/,/-->/d' .github/RELEASE_NOTES.md 2>/dev/null | sed '/^[[:space:]]*$/d')
+
           {
+            if [ -n "$SUMMARY" ]; then
+              sed '/^<!--/,/-->/d' .github/RELEASE_NOTES.md
+              echo
+              echo "<details><summary>All changes</summary>"
+              echo
+            else
+              echo "::warning::.github/RELEASE_NOTES.md is empty; using generated notes only" >&2
+            fi
+
             echo "$GENERATED"
             echo
             echo "### Commits"
@@ -367,6 +382,11 @@ jobs:
             git log --no-merges --format='- `%h` %s' "$RANGE"
             echo
             echo "Released from \`$(git rev-parse HEAD)\`."
+
+            if [ -n "$SUMMARY" ]; then
+              echo
+              echo "</details>"
+            fi
           } > NOTES.md
 
           # GitHub rejects bodies past ~125k characters, and this step runs
