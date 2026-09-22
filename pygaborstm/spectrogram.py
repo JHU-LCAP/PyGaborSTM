@@ -149,7 +149,6 @@ class AuditorySpectrogram:
         )
 
     def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
-        audio = np.asarray(audio)
         if audio.size == 0:
             raise ValueError("audio is empty; expected at least one sample.")
         shape = audio.shape

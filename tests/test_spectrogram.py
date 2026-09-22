@@ -181,3 +181,14 @@ class TestInputValidation:
         expected = AuditorySpectrogram().compute(audio_tone).data
         got = AuditorySpectrogram().compute(audio_tone[:, None]).data
         np.testing.assert_array_equal(got, expected)
+
+    @pytest.mark.gpu
+    def test_cupy_input_accepted(self, audio_tone):
+        cp = pytest.importorskip("cupy")
+        model = AuditorySpectrogram(stm.Config(use_gpu=True))
+        if not model.device.on_gpu:
+            pytest.skip("no CUDA device")
+        expected = model.compute(audio_tone).data
+        got = model.compute(cp.asarray(audio_tone)).data
+        # float32 reductions run on the device for the CuPy input.
+        np.testing.assert_allclose(got, expected, rtol=1e-3, atol=1e-5)
