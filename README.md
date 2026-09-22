@@ -1,10 +1,9 @@
 # PyGaborSTM
 
 [![PyPI](https://img.shields.io/pypi/v/pygaborstm?cacheSeconds=3600)](https://pypi.org/project/pygaborstm/)
-[![Python](https://img.shields.io/pypi/pyversions/pygaborstm?cacheSeconds=3600)](https://pypi.org/project/pygaborstm/)
 [![CI](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml/badge.svg)](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml)
 [![Docs](https://readthedocs.org/projects/pygaborstm/badge/?version=latest)](https://pygaborstm.readthedocs.io/en/latest/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/pypi/l/pygaborstm?cacheSeconds=3600)](LICENSE)
 
 PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) representations from audio signals using bio-inspired auditory spectrograms and 2D Gabor filterbanks. Documentation can be found [here](https://pygaborstm.readthedocs.io/en/latest/).
 
@@ -17,7 +16,8 @@ The project is `PyGaborSTM`; the package you install and import is lowercase
 ## Installation
 
 ```bash
-pip install pygaborstm
+pip install pygaborstm          # pip
+poetry add pygaborstm           # poetry
 ```
 
 This is the CPU install and works on macOS, Linux and Windows. It pulls only
@@ -28,6 +28,7 @@ is an extra so the core install stays small:
 
 ```bash
 pip install 'pygaborstm[viz]'
+poetry add "pygaborstm[viz]"
 ```
 
 ### GPU (optional, NVIDIA only)
@@ -36,6 +37,9 @@ Pick the extra matching your CUDA version, which `nvidia-smi` reports:
 ```bash
 pip install 'pygaborstm[cuda12]'   # CUDA 12.x
 pip install 'pygaborstm[cuda13]'   # CUDA 13.x
+
+poetry add "pygaborstm[cuda12]"
+poetry add "pygaborstm[cuda13]"
 ```
 
 Install only one: both provide the `cupy` module. CuPy has no macOS wheels, so
