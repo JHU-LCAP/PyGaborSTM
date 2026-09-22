@@ -204,11 +204,14 @@ jobs:
           # A marker of only sys_platform != darwin is NOT enough: that would
           # install cupy for every Linux and Windows user.
           for name, marker in parsed:
-              gated = name.startswith("cupy") or name in {"matplotlib", "seaborn"}
+              gated = name.startswith(("cupy", "cuda-", "nvidia-")) or name in {
+                  "matplotlib",
+                  "seaborn",
+              }
               if gated and "extra ==" not in marker:
                   raise SystemExit(f"{name} is not behind an extra; marker is {marker!r}")
 
-          print("OK: numpy/scipy/psutil unconditional; cupy and plotting extras-only")
+          print("OK: numpy/scipy/psutil unconditional; cupy, cuda-toolkit and plotting extras-only")
           PY
 
       - name: Wheel and sdist ship py.typed and the licence
