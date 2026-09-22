@@ -10,7 +10,7 @@ PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) represe
 The project is `PyGaborSTM`; the package you install and import is lowercase
 `pygaborstm`.
 
-> **Status:** 0.1.0, a first public release. The API may still change in
+> **Status:** early 0.x release. The API may still change in
 > backwards-incompatible ways before 1.0.
 
 ## Installation
