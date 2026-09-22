@@ -346,7 +346,10 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          # --match: only release tags are a valid baseline. Any other tag
+          # (experimental, a failed release) would silently truncate the
+          # changelog to "since that tag" instead of since the last release.
+          PREV=$(git describe --tags --abbrev=0 --match='v*' "${TAG}^" 2>/dev/null || true)
           if [ -n "$PREV" ]; then
             echo "previous tag: ${PREV}"
             RANGE="${PREV}..${TAG}"
