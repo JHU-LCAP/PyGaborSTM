@@ -87,6 +87,26 @@ jobs:
           print(f"version={version}")
           PY
 
+      # PyPI reserves a version permanently, and deleting a release does not
+      # free it. Catch a forgotten version bump here rather than after the
+      # TestPyPI upload has already spent the number.
+      - name: Version must not already exist on PyPI
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          for index in pypi.org test.pypi.org; do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+                     "https://${index}/pypi/pygaborstm/${VERSION}/json")
+            case "$CODE" in
+              404) echo "${index}: ${VERSION} is free" ;;
+              200) echo "::error::${index} already has pygaborstm ${VERSION}."
+                   echo "::error::Versions are permanent; bump pyproject.toml and retag."
+                   exit 1 ;;
+              *)   echo "::error::${index} returned HTTP ${CODE} for ${VERSION}"
+                   exit 1 ;;
+            esac
+          done
+
       - name: Build
         run: |
           python -m pip install --upgrade pip build "twine>=6.1"
