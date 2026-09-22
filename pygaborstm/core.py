@@ -6,11 +6,11 @@ single object so users don't have to manage the two stages by hand.
 
 import numpy as np
 
-from .config import Config
-from .spectrogram import AuditorySpectrogram
-from .gabor import GaborFilterbank
-from .structs import Spectrogram, RSF
 from .backend import to_numpy
+from .config import Config
+from .gabor import GaborFilterbank
+from .spectrogram import AuditorySpectrogram
+from .structs import RSF, Spectrogram
 
 
 class PyGaborSTM:
@@ -48,6 +48,15 @@ class PyGaborSTM:
         self._spec_model = AuditorySpectrogram(self.config)
         self._gabor_model = GaborFilterbank(self.config)
 
+    @property
+    def device(self):
+        """The backend actually in use.
+
+        ``config.use_gpu`` is the request; this is the answer. Check
+        ``model.device.on_gpu`` to confirm a GPU request took effect.
+        """
+        return self._spec_model.device
+
     def spectrogram(self, audio: np.ndarray) -> Spectrogram:
         """Compute the auditory spectrogram and return it on host.
 
@@ -79,12 +88,6 @@ class PyGaborSTM:
         """
         return self._gabor_model.compute(spec)
 
-    # NOTE: chained compute_device runs ~15ms slower than calling
-    # spectrogram()/rsf() separately on single files. Cause appears to be
-    # device-side allocation pattern interacting with cuFFT — gabor stage runs
-    # ~17ms when spec arrives via host-DMA upload but ~41ms when spec arrives
-    # from a prior device kernel. Batch throughput is unaffected. Investigate
-    # with nsys if it ever matters.
     def compute_device(self, audio: np.ndarray):
         """Run the full pipeline on device with no intermediate host transfer.
 
@@ -127,12 +130,9 @@ class PyGaborSTM:
         rsf_device = self.compute_device(audio)
         rsf_data = to_numpy(rsf_device)
 
-        frame_period = self.config.rsf_frame_shift_ms / 1000.0
-        times = np.arange(rsf_data.shape[0]) * frame_period
-
         return RSF(
             data=rsf_data,
-            times=times,
+            times=self._gabor_model.frame_times(rsf_data.shape[0]),
             rates=self._gabor_model.rates,
             scales=self._gabor_model.scales,
             freqs=self._spec_model.center_freqs,

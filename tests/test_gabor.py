@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pygaborstm as stm
-from pygaborstm.gabor import GaborFilterbank, DEFAULT_PARAM_IDX
+from pygaborstm.gabor import DEFAULT_PARAM_IDX, GaborFilterbank
 from pygaborstm.structs import RSF
 
 
@@ -166,3 +166,33 @@ class TestShapeCacheReuse:
         model.compute(spectrogram_from_tone)
         assert model._T is meshgrid_t_first
         assert model._kernel_ffts is kernel_ffts_first
+
+
+class TestParameterIsolation:
+    def test_mutating_config_arrays_does_not_relabel_cached_output(self, audio_tone):
+        # The kernels are built once and cached. Aliasing the caller's arrays
+        # let a later in-place edit change the reported rates without changing
+        # what was actually computed.
+        cfg = stm.Config(rates=np.array([-2.0, 2.0]), scales=np.array([1.0, 2.0]))
+        model = stm.PyGaborSTM(cfg)
+        before = model.compute(audio_tone)
+
+        cfg.rates[:] = [-8.0, 8.0]
+        after = model.compute(audio_tone)
+
+        np.testing.assert_array_equal(model._gabor_model.rates, [-2.0, 2.0])
+        np.testing.assert_array_equal(after.rates, before.rates)
+
+
+class TestFrameQuantisation:
+    @pytest.mark.parametrize(
+        "frmlen_ms, shift_ms",
+        [(1.1, 33), (12.0, 36), (10.0, 290), (7.0, 21), (0.3, 3)],
+    )
+    def test_exact_multiples_are_not_truncated(self, frmlen_ms, shift_ms):
+        # 33 / 1.1 is 29.999999999999996 in binary, so a bare int() loses a
+        # frame and the reported hop comes out short.
+        model = stm.PyGaborSTM(
+            stm.Config(frmlen_ms=frmlen_ms, rsf_frame_shift_ms=shift_ms)
+        )
+        assert model._gabor_model.effective_frame_shift_ms == pytest.approx(shift_ms)

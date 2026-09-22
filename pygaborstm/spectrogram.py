@@ -14,15 +14,13 @@ Pipeline:
 
 import numpy as np
 
+from .backend import (
+    get_dtypes,
+    resolve_device,
+    to_numpy,
+)
 from .config import Config
 from .structs import Spectrogram
-from .backend import (
-    get_array_module,
-    get_signal_module,
-    to_numpy,
-    next_fast_len,
-    get_dtypes,
-)
 
 # Optional GPU fast path for the y1 stage. A single CUDA kernel launch
 # runs all SOS cascades in parallel, replacing the per-channel sosfilt
@@ -31,6 +29,8 @@ from .backend import (
 try:
     from .gammatone_kernel import (
         batched_sosfilt as _batched_sosfilt_impl,
+    )
+    from .gammatone_kernel import (
         is_available as _kernel_is_available,
     )
 except ImportError:
@@ -72,6 +72,7 @@ class AuditorySpectrogram:
 
     def __init__(self, config: Config | None = None):
         cfg = config or Config()
+        cfg.validate()
 
         self.sample_rate = cfg.sample_rate
         self.n_filters = cfg.n_filters
@@ -79,10 +80,8 @@ class AuditorySpectrogram:
         self.octaves = cfg.octaves
         self.tau_ms = cfg.tau_ms
         self.frmlen_ms = cfg.frmlen_ms
-        self.use_gpu = cfg.use_gpu
-
-        self.xp = get_array_module(self.use_gpu)
-        self.signal = get_signal_module(self.use_gpu)
+        self.device = resolve_device(cfg.use_gpu)
+        self.use_gpu = self.device.on_gpu
         self.float_dtype, self.complex_dtype = get_dtypes()
 
         self.filter_order = cfg.filter_order
@@ -105,6 +104,43 @@ class AuditorySpectrogram:
         self._y5_n_fft = None
         self._y5_pad = None
 
+    @property
+    def xp(self):
+        """Active array module. Derived from :attr:`device`, never stored."""
+        return self.device.xp
+
+    @property
+    def signal(self):
+        """Active signal module. Derived from :attr:`device`, never stored."""
+        return self.device.signal
+
+    def __getstate__(self) -> dict:
+        # Device-resident arrays and the kernel handle are rebuilt on load,
+        # so a model pickled on a GPU box restores on a CPU-only one.
+        state = self.__dict__.copy()
+        for key in (
+            "_sos_device",
+            "_sos_device_f32",
+            "_batched_sosfilt",
+            "_y5_kernel_fft",
+        ):
+            state.pop(key, None)
+        state["_cached_n_samples"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        # Re-resolve, then take the answer: a model pickled on a GPU box may
+        # be loaded where no device exists, and a stale use_gpu would leave
+        # the y1 fast path enabled against numpy arrays.
+        self.device = resolve_device(self.use_gpu)
+        self.use_gpu = self.device.on_gpu
+        self._init_gammatone_filters()
+        self._init_y1_fast_path()
+        self._y5_kernel_fft = None
+        self._y5_n_fft = None
+        self._y5_pad = None
+
     # ----- init helpers (run once) -------------------------------------------
 
     def _create_frequency_scale(self) -> np.ndarray:
@@ -113,6 +149,16 @@ class AuditorySpectrogram:
         )
 
     def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
+        if audio.size == 0:
+            raise ValueError("audio is empty; expected at least one sample.")
+        if audio.size < self._L_frm:
+            raise ValueError(
+                f"audio has {audio.size} samples, fewer than one spectrogram "
+                f"frame ({self._L_frm} samples at frmlen_ms={self.frmlen_ms}, "
+                f"sample_rate={self.sample_rate} Hz)."
+            )
+        if not np.all(np.isfinite(audio)):
+            raise ValueError("audio contains NaN or inf.")
         audio = audio.astype(self.float_dtype)
         audio = audio - np.mean(audio)
         audio = audio / (np.max(np.abs(audio)) + 1e-10)
@@ -127,7 +173,9 @@ class AuditorySpectrogram:
         B = 1.019 * 2 * np.pi * ERB
 
         sos_list = []
-        for fc, bw in zip(self.center_freqs, B):
+        # strict: B is derived elementwise from center_freqs, so a length
+        # mismatch would mean the filter bank is malformed, not truncatable.
+        for fc, bw in zip(self.center_freqs, B, strict=True):
             omega = 2 * np.pi * fc
             r = np.exp(-bw * T)
             theta = omega * T
@@ -171,7 +219,7 @@ class AuditorySpectrogram:
         self._batched_sosfilt = None
         self._sos_device_f32 = None
         if (
-            self.use_gpu
+            self.device.on_gpu
             and _batched_sosfilt_impl is not None
             and _kernel_is_available()
             and self.float_dtype == np.float32
@@ -188,7 +236,7 @@ class AuditorySpectrogram:
 
         xp = self.xp
         n_conv = n_samples + self._tau_samples - 1
-        n_fft = next_fast_len(n_conv, self.use_gpu)
+        n_fft = self.device.next_fast_len(n_conv)
 
         kernel_device = xp.asarray(self._y5_kernel_host)
         self._y5_n_fft = n_fft
@@ -254,7 +302,12 @@ class AuditorySpectrogram:
 
     def _downsample(self, spectrogram):
         """Downsample using device-native resample_poly (no CPU round-trip on GPU)."""
-        return self.signal.resample_poly(spectrogram, up=1, down=self._L_frm, axis=1)
+        out = self.signal.resample_poly(spectrogram, up=1, down=self._L_frm, axis=1)
+        # cupyx's resample_poly upcasts float32 to float64 where scipy's does
+        # not. Left alone, the Gabor stage would then run its FFTs in double
+        # on GPU only, making the chained path slower than the staged one and
+        # giving the two routes different results.
+        return out.astype(self.float_dtype, copy=False)
 
     # ----- public API --------------------------------------------------------
 
@@ -292,7 +345,10 @@ class AuditorySpectrogram:
         y5 = xp.cbrt(y5)
         y5 = self._downsample(y5)
 
-        return y5.T  # (n_freq, n_time) → (n_time, n_freq)
+        # Contiguous, not a transposed view: cuFFT gives different float32
+        # results for the same values in a different layout, which made the
+        # chained and staged paths disagree on GPU.
+        return xp.ascontiguousarray(y5.T)  # (n_freq, n_time) → (n_time, n_freq)
 
     def compute(self, audio: np.ndarray) -> Spectrogram:
         """Compute the spectrogram and copy the result to host as a dataclass.

@@ -1,6 +1,6 @@
 import numpy as np
 
-from pygaborstm.structs import Spectrogram, RSF
+from pygaborstm.structs import RSF, Spectrogram
 
 
 class TestSpectrogram:

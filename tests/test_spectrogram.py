@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import pygaborstm as stm
 from pygaborstm.spectrogram import AuditorySpectrogram
@@ -152,3 +153,20 @@ class TestComputeDeviceOrientation:
         device_out = model.compute_device(audio_tone)  # (n_time, n_freq)
         host_spec = model.compute(audio_tone)  # (n_freq, n_time)
         np.testing.assert_array_equal(device_out.T, host_spec.data)
+
+
+class TestInputValidation:
+    # These used to surface as cryptic SciPy errors.
+    def test_empty_audio_rejected(self):
+        with pytest.raises(ValueError, match="audio is empty"):
+            AuditorySpectrogram().compute(np.array([]))
+
+    def test_audio_shorter_than_one_frame_rejected(self):
+        with pytest.raises(ValueError, match="fewer than one spectrogram frame"):
+            AuditorySpectrogram().compute(np.zeros(4))
+
+    def test_non_finite_audio_rejected(self, audio_tone):
+        corrupted = audio_tone.copy()
+        corrupted[0] = np.nan
+        with pytest.raises(ValueError, match="NaN or inf"):
+            AuditorySpectrogram().compute(corrupted)

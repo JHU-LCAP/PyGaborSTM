@@ -7,16 +7,32 @@ rate split, etc.) so notebook code can stay short.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, List, Dict
-
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.axes import Axes
 
-from .structs import Spectrogram, RSF
+from .structs import RSF, Spectrogram
 
-if TYPE_CHECKING:
-    pass
+#: Backends that render to a file and cannot display a window. Calling
+#: plt.show() on these is a no-op that emits a warning.
+_HEADLESS_BACKENDS = frozenset({"agg", "cairo", "pdf", "pgf", "ps", "svg", "template"})
+
+
+def _show() -> None:
+    """Display the figure, unless the active backend cannot."""
+    if plt.get_backend().lower() not in _HEADLESS_BACKENDS:
+        plt.show()
+
+
+def _required(item, key: str, idx: int):
+    """Pull ``key`` from a grid entry, naming the offending index if absent."""
+    try:
+        return item[key]
+    except (KeyError, TypeError):
+        raise KeyError(
+            f"grid entry {idx} is missing the required '{key}' key; "
+            f"each entry looks like {{'{key}': <obj>, 'title': <str>}}"
+        ) from None
 
 
 def _get_freq_ticks(freqs: np.ndarray):
@@ -42,7 +58,7 @@ def plt_spectrogram(
     figsize: tuple = (12, 6),
     cmap: str = "viridis",
     frmlen_ms: float = 16.0,
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     show_colorbar: bool = True,
     title_fontsize: int = 12,
     label_fontsize: int = 10,
@@ -84,7 +100,7 @@ def plt_spectrogram(
     """
     # Create figure if no ax provided
     if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
+        _fig, ax = plt.subplots(figsize=figsize)
         standalone = True
     else:
         standalone = False
@@ -126,19 +142,19 @@ def plt_spectrogram(
 
     if standalone:
         plt.tight_layout()
-        plt.show()
+        _show()
 
     return ax
 
 
 def plt_spectrogram_grid(
-    data: List[Dict],
+    data: list[dict],
     n_cols: int = 4,
     figsize: tuple | None = None,
     cmap: str = "viridis",
     frmlen_ms: float = 16.0,
     suptitle: str | None = None,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> None:
     """Plot multiple spectrograms in a grid.
 
@@ -179,7 +195,7 @@ def plt_spectrogram_grid(
 
     for idx, item in enumerate(data):
         ax = axes_flat[idx]
-        spectrogram = item["spectrogram"]
+        spectrogram = _required(item, "spectrogram", idx)
         title = item.get("title", f"Spectrogram {idx + 1}")
 
         plt_spectrogram(
@@ -210,7 +226,7 @@ def plt_spectrogram_grid(
         plt.savefig(save_path, dpi=200, bbox_inches="tight")
         print(f"Saved to '{save_path}'")
 
-    plt.show()
+    _show()
 
 
 def plt_rsf(
@@ -221,7 +237,7 @@ def plt_rsf(
     title: str = "Rate-Scale Representation",
     figsize: tuple = (10, 8),
     cmap: str = "viridis",
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     show_colorbar: bool = True,
     title_fontsize: int = 12,
     label_fontsize: int = 10,
@@ -296,7 +312,7 @@ def plt_rsf(
 
     # Create figure if no ax provided
     if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
+        _fig, ax = plt.subplots(figsize=figsize)
         standalone = True
     else:
         standalone = False
@@ -367,13 +383,13 @@ def plt_rsf(
 
     if standalone:
         plt.tight_layout()
-        plt.show()
+        _show()
 
     return ax
 
 
 def plt_rsf_grid(
-    data: List[Dict],
+    data: list[dict],
     rates: np.ndarray | None = None,
     scales: np.ndarray | None = None,
     fold: bool = False,
@@ -381,7 +397,7 @@ def plt_rsf_grid(
     figsize: tuple | None = None,
     cmap: str = "viridis",
     suptitle: str | None = None,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> None:
     """Plot multiple RSF representations in a grid.
 
@@ -420,7 +436,7 @@ def plt_rsf_grid(
         return
 
     # Get rates/scales from first RSF if not provided
-    first_rsf = data[0]["rsf"]
+    first_rsf = _required(data[0], "rsf", 0)
     if isinstance(first_rsf, RSF):
         r_rates = rates if rates is not None else first_rsf.rates
         r_scales = scales if scales is not None else first_rsf.scales
@@ -444,7 +460,7 @@ def plt_rsf_grid(
 
     for idx, item in enumerate(data):
         ax = axes_flat[idx]
-        rsf = item["rsf"]
+        rsf = _required(item, "rsf", idx)
         title = item.get("title", f"RSF {idx + 1}")
 
         plt_rsf(
@@ -476,4 +492,4 @@ def plt_rsf_grid(
         plt.savefig(save_path, dpi=200, bbox_inches="tight")
         print(f"Saved to '{save_path}'")
 
-    plt.show()
+    _show()

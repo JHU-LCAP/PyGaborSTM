@@ -1,6 +1,7 @@
 """Data classes for spectrogram and RSF representations."""
 
 from dataclasses import dataclass
+
 import numpy as np
 
 
@@ -81,7 +82,7 @@ class RSF:
         RSF array of shape ``(n_frames, n_rates, n_scales, n_freq)``.
         May be numpy or cupy.
     times : np.ndarray
-        Frame center times in seconds, length ``n_frames``.
+        Frame start times in seconds, length ``n_frames``.
     rates : np.ndarray
         Temporal modulation rates in Hz, length ``n_rates``. The first
         half is negative (upward sweeps), the second half is positive

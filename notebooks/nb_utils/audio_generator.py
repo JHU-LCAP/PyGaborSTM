@@ -4,8 +4,9 @@ Stimulus generation for auditory spectrogram validation.
 Based on Chi, Ru & Shamma (2005) "Multiresolution spectrotemporal analysis of complex sounds"
 """
 
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 import soundfile as sf
 
 # Defaults
@@ -35,7 +36,9 @@ def generate_broadband_noise(duration=DURATION, sr=SR, seed=42):
     phases = rng.uniform(0, 2 * np.pi, 59)
 
     t = np.arange(int(duration * sr)) / sr
-    signal = sum(np.sin(2 * np.pi * f * t + p) for f, p in zip(freqs, phases))
+    signal = sum(
+        np.sin(2 * np.pi * f * t + p) for f, p in zip(freqs, phases, strict=True)
+    )
     return 0.5 * signal / np.max(np.abs(signal))
 
 
@@ -97,7 +100,7 @@ def generate_moving_ripple(
 
     # Generate ripple: sum of modulated sinusoids
     signal = np.zeros(n_samples)
-    for i, (freq, xi, phi) in enumerate(zip(freqs, x, phases)):
+    for freq, xi, phi in zip(freqs, x, phases, strict=True):
         # Ripple envelope: 1 + Am * sin(2π * Ω * x + 2π * ω * t)
         envelope = 1 + mod_depth * np.sin(2 * np.pi * scale * xi + 2 * np.pi * rate * t)
         carrier = np.sin(2 * np.pi * freq * t + phi)
@@ -143,7 +146,9 @@ def save_three_tones(output_dir, duration=DURATION, sr=SR):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for freq, audio in zip([250, 1000, 4000], generate_three_tones(duration, sr)):
+    for freq, audio in zip(
+        [250, 1000, 4000], generate_three_tones(duration, sr), strict=True
+    ):
         sf.write(output_dir / f"tone_{freq}Hz.wav", audio, sr)
 
 

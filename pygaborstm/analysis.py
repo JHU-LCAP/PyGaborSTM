@@ -5,8 +5,27 @@ Provides matched-filter MTF computation and plotting for validating
 Gabor filterbank tuning against Chi, Ru & Shamma (1999).
 """
 
-import numpy as np
+import warnings
+
 import matplotlib.pyplot as plt
+import numpy as np
+
+from ._optional import require
+
+
+def _axis_index(axis, value, kind: str) -> int:
+    """Locate ``value`` on ``axis``, or say which key was off the grid.
+
+    Keys are matched by exact float equality, so a value that is merely
+    close does not match.
+    """
+    hits = np.where(np.asarray(axis) == value)[0]
+    if hits.size == 0:
+        raise ValueError(
+            f"{kind} {value!r} is not present in the RSF {kind} axis "
+            f"{np.asarray(axis).tolist()}. Keys are matched exactly."
+        )
+    return int(hits[0])
 
 
 def compute_matched_filter_mtf(rsf_dict: dict) -> dict:
@@ -19,6 +38,12 @@ def compute_matched_filter_mtf(rsf_dict: dict) -> dict:
     Returns:
         dict with upward/downward matrices (raw magnitudes), rates, scales
     """
+    if not rsf_dict:
+        raise ValueError(
+            "rsf_dict is empty; expected {(rate, scale): RSF} with one entry "
+            "per ripple stimulus."
+        )
+
     first = next(iter(rsf_dict.values()))
     up_rates = np.array(first.upward_rates())
     down_rates = np.array(first.downward_rates())
@@ -26,19 +51,32 @@ def compute_matched_filter_mtf(rsf_dict: dict) -> dict:
 
     matched_up = np.zeros((len(scales), len(up_rates)))
     matched_down = np.zeros((len(scales), len(down_rates)))
+    filled = 0
 
     for (rate, scale), rsf in rsf_dict.items():
-        rate_idx = np.where(rsf.rates == rate)[0][0]
-        scale_idx = np.where(rsf.scales == scale)[0][0]
+        rate_idx = _axis_index(rsf.rates, rate, "rate")
+        scale_idx = _axis_index(rsf.scales, scale, "scale")
         response = rsf.data[:, rate_idx, scale_idx, :].mean()
 
-        scale_i = np.where(scales == scale)[0][0]
+        scale_i = _axis_index(scales, scale, "scale")
         if rate < 0:
-            rate_i = np.where(up_rates == rate)[0][0]
+            rate_i = _axis_index(up_rates, rate, "rate")
             matched_up[scale_i, rate_i] = response
         else:
-            rate_i = np.where(down_rates == rate)[0][0]
+            rate_i = _axis_index(down_rates, rate, "rate")
             matched_down[scale_i, rate_i] = response
+        filled += 1
+
+    expected = matched_up.size + matched_down.size
+    if filled < expected:
+        # Unfilled cells keep their initialised 0.0 and are indistinguishable
+        # from a genuine null response, so say so rather than return silently.
+        warnings.warn(
+            f"rsf_dict covers {filled} of {expected} (rate, scale) cells; "
+            f"the remaining {expected - filled} are reported as 0.0.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return {
         "upward": matched_up,
@@ -168,7 +206,7 @@ def plot_mtf_heatmap(
     annot: bool = True,
 ) -> tuple:
     """Plot matched filter MTF as heatmaps using seaborn."""
-    import seaborn as sns
+    sns = require("seaborn", extra="viz", feature="plot_mtf_heatmap()")
 
     d = _get_plot_data(rsf_dict, normalize)
     fmt = (

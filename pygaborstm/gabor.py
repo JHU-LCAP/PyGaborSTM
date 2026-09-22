@@ -16,19 +16,17 @@ any GPU, including lower-memory devices like the Jetson Orin Nano.
 """
 
 import warnings
+
 import numpy as np
-from typing import Tuple
 
-from .config import Config
-from .structs import Spectrogram, RSF
 from .backend import (
-    get_array_module,
-    to_numpy,
-    next_fast_len,
     get_dtypes,
-    get_available_memory,
+    resolve_device,
+    to_numpy,
 )
-
+from .config import Config
+from .constants import RESOLUTION_MULTIPLIERS
+from .structs import RSF, Spectrogram
 
 PARAM_OPTIONS = {
     "sigma_t": np.array(
@@ -95,14 +93,7 @@ class GaborFilterbank:
         mode).
     """
 
-    RESOLUTION_MULTIPLIERS = {
-        "low": 1,
-        "medium": 2,
-        "high": 4,
-        "ultra": 8,
-        "max": 16,
-        "overkill": 32,
-    }
+    RESOLUTION_MULTIPLIERS = RESOLUTION_MULTIPLIERS
 
     # Above this kernel count, warn at construction time: compute work scales
     # linearly with n_kernels regardless of GPU memory or streaming mode.
@@ -114,14 +105,14 @@ class GaborFilterbank:
 
     def __init__(self, config: Config | None = None):
         cfg = config or Config()
+        cfg.validate()
 
         self.sample_rate = cfg.sample_rate
         self.n_filters = cfg.n_filters
         self.rsf_frame_size_ms = cfg.rsf_frame_size_ms
         self.rsf_frame_shift_ms = cfg.rsf_frame_shift_ms
-        self.use_gpu = cfg.use_gpu
-
-        self.xp = get_array_module(self.use_gpu)
+        self.device = resolve_device(cfg.use_gpu)
+        self.use_gpu = self.device.on_gpu
         self.float_dtype, self.complex_dtype = get_dtypes()
 
         self.frmlen_ms = cfg.frmlen_ms
@@ -156,11 +147,66 @@ class GaborFilterbank:
         self._batch_size = None
         self._kernel_ffts = None  # cached when it fits; None → streaming path
 
+    @property
+    def xp(self):
+        """Active array module. Derived from :attr:`device`, never stored."""
+        return self.device.xp
+
+    def _frames_per(self, duration_ms: float) -> int:
+        """How many whole spectrogram frames fit in ``duration_ms``.
+
+        Exact multiples must not truncate. A single division avoids the
+        worst of it, but binary floating point still puts e.g. 33 / 1.1 at
+        29.999999999999996, so snap quotients within noise of an integer.
+        """
+        frames = duration_ms / self.frmlen_ms
+        nearest = round(frames)
+        if abs(frames - nearest) <= 1e-9 * max(1.0, abs(frames)):
+            return int(nearest)
+        return int(frames)
+
+    @property
+    def effective_frame_shift_ms(self) -> float:
+        """Actual RSF hop in ms, after quantisation to whole frames.
+
+        The hop can only advance in whole spectrogram frames, so a
+        requested ``rsf_frame_shift_ms`` below ``frmlen_ms`` is rounded up
+        to one frame. With the defaults, a requested 10 ms becomes 16 ms.
+        """
+        shift = getattr(self, "_frame_shift", None)
+        if shift is None:
+            shift = max(1, self._frames_per(self.rsf_frame_shift_ms))
+        return shift * self.frmlen_ms
+
+    def frame_times(self, n_frames: int) -> np.ndarray:
+        """Frame start times in seconds, using the effective hop."""
+        return np.arange(n_frames) * (self.effective_frame_shift_ms / 1000.0)
+
+    #: Attributes built from the active array module. They are device-resident
+    #: under CuPy, so they are dropped on pickle and rebuilt by
+    #: _ensure_shape_cache, which reruns whenever _cached_shape is None.
+    _DEVICE_CACHE_ATTRS = ("_T", "_F", "_frame_indices", "_kernel_ffts")
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        for key in self._DEVICE_CACHE_ATTRS:
+            state[key] = None
+        state["_cached_shape"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self.device = resolve_device(self.use_gpu)
+        self.use_gpu = self.device.on_gpu
+
     # ----- rates/scales (config-dependent, computed at init) ------------------
 
-    def _get_rates_scales(self, cfg: Config) -> Tuple[np.ndarray, np.ndarray]:
-        cfg_rates = np.asarray(cfg.rates, dtype=np.float64)
-        cfg_scales = np.asarray(cfg.scales, dtype=np.float64)
+    def _get_rates_scales(self, cfg: Config) -> tuple[np.ndarray, np.ndarray]:
+        # copy, not asarray: the kernels are built once and cached, so
+        # aliasing the caller's arrays lets a later in-place edit relabel the
+        # output without changing what was actually computed.
+        cfg_rates = np.array(cfg.rates, dtype=np.float64, copy=True)
+        cfg_scales = np.array(cfg.scales, dtype=np.float64, copy=True)
 
         if cfg.resolution not in self.RESOLUTION_MULTIPLIERS:
             raise ValueError(
@@ -207,21 +253,21 @@ class GaborFilterbank:
 
         # FFT padding
         self._pad_shape = (
-            next_fast_len(2 * n_time - 1, self.use_gpu),
-            next_fast_len(2 * n_freq - 1, self.use_gpu),
+            self.device.next_fast_len(2 * n_time - 1),
+            self.device.next_fast_len(2 * n_freq - 1),
         )
         self._crop_t = (n_time - 1) // 2
         self._crop_f = (n_freq - 1) // 2
 
-        # Frame integration
-        window_size = int(self.rsf_frame_size_ms / 1000.0 / self.time_per_frame)
-        frame_shift = max(
-            1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame)
-        )
+        # Frame integration. The hop is quantised to whole spectrogram frames,
+        # so the effective shift can exceed the requested one.
+        window_size = self._frames_per(self.rsf_frame_size_ms)
+        frame_shift = max(1, self._frames_per(self.rsf_frame_shift_ms))
         n_frames = max(1, (n_time - window_size) // frame_shift + 1)
         if n_frames == 1:
             window_size = n_time
 
+        self._frame_shift = frame_shift
         self._n_frames = n_frames
         starts = xp.arange(n_frames) * frame_shift
         offsets = xp.arange(window_size)
@@ -230,7 +276,7 @@ class GaborFilterbank:
         # Batch size
         bytes_per_complex = np.dtype(self.complex_dtype).itemsize
         mem_per_filter = 3 * self._pad_shape[0] * self._pad_shape[1] * bytes_per_complex
-        available = get_available_memory(self.use_gpu)
+        available = self.device.available_memory()
         self._batch_size = min(
             self._n_kernels, max(1, int(available * 0.5 / mem_per_filter))
         )
@@ -259,7 +305,7 @@ class GaborFilterbank:
             * np.dtype(self.complex_dtype).itemsize
         )
         cache_bytes = K * bytes_per_fft
-        available = get_available_memory(self.use_gpu)
+        available = self.device.available_memory()
 
         if cache_bytes > available * self._CACHE_MEMORY_BUDGET:
             warnings.warn(
@@ -288,8 +334,7 @@ class GaborFilterbank:
                 axes=(-2, -1),
             ).astype(self.complex_dtype)
             del kernels_chunk
-            if self.use_gpu:
-                xp.cuda.Stream.null.synchronize()
+            self.device.synchronize()
 
     # ----- kernel construction -----------------------------------------------
 
@@ -382,8 +427,7 @@ class GaborFilterbank:
             filtered = xp.abs(filtered_full[:, ct : ct + n_time, cf : cf + n_freq])
             rsf_flat[start:end] = filtered[:, self._frame_indices, :].mean(axis=2)
 
-            if self.use_gpu:
-                xp.cuda.Stream.null.synchronize()
+            self.device.synchronize()
 
         rsf_data = rsf_flat.reshape(
             self._n_rates, self._n_scales, self._n_frames, n_freq
@@ -437,8 +481,7 @@ class GaborFilterbank:
             rsf_flat[start:end] = filtered[:, self._frame_indices, :].mean(axis=2)
             del filtered
 
-            if self.use_gpu:
-                xp.cuda.Stream.null.synchronize()
+            self.device.synchronize()
 
         rsf_data = rsf_flat.reshape(
             self._n_rates, self._n_scales, self._n_frames, n_freq
@@ -546,12 +589,9 @@ class GaborFilterbank:
         device_out = self.compute_device(spec_device, params)
         rsf_data = to_numpy(device_out)
 
-        frame_period = self.rsf_frame_shift_ms / 1000.0
-        times = np.arange(rsf_data.shape[0]) * frame_period
-
         return RSF(
             data=rsf_data,
-            times=times,
+            times=self.frame_times(rsf_data.shape[0]),
             rates=self.rates,
             scales=self.scales,
             freqs=freqs,

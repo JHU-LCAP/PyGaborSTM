@@ -1,50 +1,131 @@
 [project]
-name = "PyGaborSTM"
+name = "pygaborstm"
 version = "0.1.0"
-description = "PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) representations from audio signals using bio-inspired auditory spectrograms and 2D Gabor filterbanks."
-authors = []
+description = "Rate-Scale-Frequency (RSF) representations from audio via bio-inspired auditory spectrograms and 2D Gabor filterbanks."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 
-[tool.poetry]
-packages = [{include = "pygaborstm"}]
+# PEP 639 SPDX expression. Do not also add a "License :: OSI Approved ::"
+# classifier; the classifier is deprecated when an expression is present.
+license = "MIT"
+license-files = ["LICENSE"]
 
-[tool.poetry.dependencies]
-cupy-cuda13x = "^14.0.1"
-[dependency-groups]
-core = [
+authors = [
+    { name = "Johns Hopkins University - Laboratory for Computational Audio Perception" },
+]
+
+keywords = [
+    "audio",
+    "speech",
+    "auditory-model",
+    "spectro-temporal-modulation",
+    "gabor-filterbank",
+    "cochlear-model",
+    "rate-scale-frequency",
+    "signal-processing",
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+
+# What `import pygaborstm` actually needs. Plotting is not included: the
+# plot and analysis submodules load lazily, so matplotlib is only required
+# if you use them.
+dependencies = [
     "numpy (>=2.3.3,<3.0.0)",
     "scipy (>=1.16.2,<2.0.0)",
-    "soundfile (>=0.13.1,<0.14.0)",
-    "pandas (>=2.3.2,<3.0.0)",
-    "pyyaml (>=6.0.2,<7.0.0)",
-    "librosa (>=0.11.0,<0.12.0)"
+    "psutil (>=5.9)",
 ]
+
+[project.optional-dependencies]
+viz = [
+    "matplotlib (>=3.10,<4.0)",
+    "seaborn (>=0.13,<0.14)",
+]
+
+# CuPy publishes manylinux and win_amd64 wheels only. The marker makes these
+# extras a no-op on macOS so the install still succeeds there and the library
+# falls back to NumPy with a warning, instead of failing to resolve.
+cuda12 = ["cupy-cuda12x (>=13.0,<15.0) ; sys_platform != 'darwin'"]
+cuda13 = ["cupy-cuda13x (>=14.0.1,<15.0) ; sys_platform != 'darwin'"]
+
+[project.urls]
+Homepage = "https://github.com/JHU-LCAP/PyGaborSTM"
+Documentation = "https://pygaborstm.readthedocs.io/"
+Repository = "https://github.com/JHU-LCAP/PyGaborSTM"
+Issues = "https://github.com/JHU-LCAP/PyGaborSTM/issues"
+
+[dependency-groups]
 dev = [
     "pytest (>=8.4.2,<9.0.0)",
     "pytest-cov (>=7.0.0,<8.0.0)",
-    "ruff (>=0.13.1,<0.14.0)"
+    # Pinned exactly: ruff's default rule set grows between releases, so an
+    # unpinned gate breaks on a release nobody asked for.
+    "ruff (==0.13.3)",
+    "build (>=1.2)",
+    "twine (>=6.1)",
 ]
 notebook = [
     "jupyter (>=1.1.1,<2.0.0)",
     "ipykernel (>=6.30.1,<7.0.0)",
     "matplotlib (>=3.10.6,<4.0.0)",
-    "seaborn (>=0.13.2,<0.14.0)"
+    "seaborn (>=0.13.2,<0.14.0)",
+    "soundfile (>=0.13.1,<0.14.0)",
+    "librosa (>=0.11.0,<0.12.0)",
 ]
 docs = [
     "mkdocs (>=1.6.0,<2.0.0)",
     "mkdocs-material (>=9.5.0,<10.0.0)",
-    "mkdocstrings[python] (>=1.0.4,<2.0.0)"
+    "mkdocstrings[python] (>=1.0.4,<2.0.0)",
 ]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core>=2.1.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+packages = [{ include = "pygaborstm" }]
+# py.typed carries no code, so name it explicitly and for both formats.
+include = [{ path = "pygaborstm/py.typed", format = ["sdist", "wheel"] }]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Selected explicitly. Relying on ruff's implicit defaults is what let this
+# gate drift: the default set grows between releases, so a tree that is clean
+# today fails on a release nobody asked for.
+select = ["E", "F", "W", "I", "UP", "B", "C4", "RUF"]
+ignore = ["E501"]  # line length is the formatter's job
 
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["E402"]
+# RUF001-003 flag "ambiguous" unicode. Here that is sigma, alpha and the
+# multiplication sign in Gabor documentation, which is the correct notation for
+# the domain. Ignored per file rather than globally so genuinely ambiguous
+# characters elsewhere are still caught.
+"pygaborstm/gabor.py" = ["RUF001", "RUF002"]
+"notebooks/nb_utils/audio_generator.py" = ["RUF001", "RUF002"]
+"notebooks/*_validation.ipynb" = ["E402", "RUF003"]
+"notebooks/benchmark.ipynb" = ["E402", "RUF001"]
+"tests/test_structs.py" = ["RUF003"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "gpu: requires CUDA GPU (skipped in CPU-only CI; run locally with pytest -m gpu)",
 ]
+
+[tool.coverage.run]
+source = ["pygaborstm"]

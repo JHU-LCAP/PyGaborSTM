@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pytest
 
@@ -52,6 +54,40 @@ class TestAvailableMemory:
         assert isinstance(mem, int)
         assert mem > 0
 
+    def test_without_procfs_still_returns_a_number(self, monkeypatch):
+        # /proc/meminfo does not exist on macOS or Windows, so this is the
+        # path those platforms always take.
+        def no_procfs(*args, **kwargs):
+            raise FileNotFoundError("/proc/meminfo")
+
+        monkeypatch.setattr("builtins.open", no_procfs)
+        mem = backend.get_available_memory(use_gpu=False)
+        assert isinstance(mem, int)
+        assert mem > 0
+
+    def test_without_procfs_or_psutil_uses_default(self, monkeypatch):
+        def no_procfs(*args, **kwargs):
+            raise FileNotFoundError("/proc/meminfo")
+
+        monkeypatch.setattr("builtins.open", no_procfs)
+        monkeypatch.setitem(sys.modules, "psutil", None)
+        assert backend.get_available_memory(use_gpu=False) == 4 * 1024**3
+
+    def test_never_raises_when_psutil_itself_fails(self, monkeypatch):
+        # psutil reads /proc on Linux and can fail in restricted containers.
+        # The probe is advisory, so it must degrade rather than propagate.
+        class BrokenPsutil:
+            @staticmethod
+            def virtual_memory():
+                raise PermissionError("denied")
+
+        def no_procfs(*args, **kwargs):
+            raise FileNotFoundError("/proc/meminfo")
+
+        monkeypatch.setattr("builtins.open", no_procfs)
+        monkeypatch.setitem(sys.modules, "psutil", BrokenPsutil)
+        assert backend.get_available_memory(use_gpu=False) == 4 * 1024**3
+
 
 class TestToNumpy:
     def test_numpy_passthrough(self):
@@ -59,3 +95,51 @@ class TestToNumpy:
         result = backend.to_numpy(arr)
         assert isinstance(result, np.ndarray)
         np.testing.assert_array_equal(result, arr)
+
+
+class TestResolveDevice:
+    def test_cpu_request_resolves_to_cpu(self):
+        dev = backend.resolve_device(use_gpu=False)
+        assert dev.on_gpu is False
+        assert dev.xp is np
+
+    def test_gpu_request_without_cupy_resolves_to_cpu(self, monkeypatch):
+        monkeypatch.setattr(backend, "CUPY_AVAILABLE", False)
+        with pytest.warns(UserWarning, match="CuPy not available"):
+            dev = backend.resolve_device(use_gpu=True)
+        assert dev.on_gpu is False
+        assert dev.xp is np
+
+    def test_cupy_present_but_no_device_resolves_to_cpu(self, monkeypatch):
+        # CuPy wheels install on any Linux/Windows box; importability is not
+        # proof of a usable GPU.
+        monkeypatch.setattr(backend, "CUPY_AVAILABLE", True)
+        monkeypatch.setattr(backend, "_cuda_device_present", lambda: False)
+        monkeypatch.setattr(backend, "_DEVICE_PROBE_ERROR", "no CUDA devices reported")
+        with pytest.warns(UserWarning, match="no usable CUDA device"):
+            dev = backend.resolve_device(use_gpu=True)
+        assert dev.on_gpu is False
+        assert dev.xp is np
+
+    def test_device_probe_swallows_runtime_errors(self, monkeypatch):
+        class FakeRuntime:
+            @staticmethod
+            def getDeviceCount():
+                raise RuntimeError("cudaErrorNoDevice")
+
+        fake_cp = type("cp", (), {"cuda": type("cuda", (), {"runtime": FakeRuntime})})
+        monkeypatch.setattr(backend, "cp", fake_cp)
+        backend._reset_device_probe()
+        try:
+            assert backend._cuda_device_present() is False
+        finally:
+            backend._reset_device_probe()
+
+    def test_synchronize_is_noop_on_cpu(self):
+        backend.resolve_device(use_gpu=False).synchronize()
+
+    def test_device_is_picklable(self):
+        import pickle
+
+        dev = backend.resolve_device(use_gpu=False)
+        assert pickle.loads(pickle.dumps(dev)) == dev

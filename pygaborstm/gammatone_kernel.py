@@ -13,7 +13,6 @@ fallback path.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -91,7 +90,7 @@ extern "C" __global__ void batched_sosfilt_kernel(
 }
 """
 
-_kernel_cache: dict[tuple[int, str], "cp.RawKernel"] = {}
+_kernel_cache: dict[tuple[int, str], cp.RawKernel] = {}
 
 _DTYPE_MAP = {
     "float64": ("double", cp.float64 if _HAS_CUPY else None),
@@ -114,14 +113,19 @@ def is_available() -> bool:
     if not _HAS_CUPY:
         return False
     try:
-        _get_kernel(1, "float32")
+        if cp.cuda.runtime.getDeviceCount() < 1:
+            return False
+        # RawKernel construction is lazy, so launch the stub: compiling it
+        # alone would return True on a machine with no usable device.
+        kernel = _get_kernel(1, "float32")
+        kernel.compile()
         return True
     except Exception as e:
         logger.warning("batched_sosfilt kernel unavailable: %s", e)
         return False
 
 
-def _get_kernel(n_sections: int, precision: str) -> "cp.RawKernel":
+def _get_kernel(n_sections: int, precision: str) -> cp.RawKernel:
     key = (n_sections, precision)
     if key in _kernel_cache:
         return _kernel_cache[key]
@@ -138,12 +142,12 @@ def _get_kernel(n_sections: int, precision: str) -> "cp.RawKernel":
 
 
 def batched_sosfilt(
-    sos: "cp.ndarray",
-    x: "cp.ndarray",
+    sos: cp.ndarray,
+    x: cp.ndarray,
     gain: float = 1.0,
-    out: Optional["cp.ndarray"] = None,
+    out: cp.ndarray | None = None,
     precision: str = "float64",
-) -> "cp.ndarray":
+) -> cp.ndarray:
     """Apply a per-channel SOS cascade to the same input in one kernel launch.
 
     Equivalent to a loop of ``cupyx.scipy.signal.sosfilt`` calls, each
