@@ -1,6 +1,6 @@
 [project]
 name = "pygaborstm"
-version = "0.1.1.dev0"
+version = "0.1.1"
 description = "Rate-Scale-Frequency (RSF) representations from audio via bio-inspired auditory spectrograms and 2D Gabor filterbanks."
 readme = "README.md"
 requires-python = ">=3.11"
