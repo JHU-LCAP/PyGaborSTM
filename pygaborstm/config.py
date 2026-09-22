@@ -51,7 +51,9 @@ class Config:
     rsf_frame_size_ms : int, default 500
         RSF integration window length in ms.
     rsf_frame_shift_ms : int, default 10
-        RSF hop size in ms.
+        RSF hop size in ms. Rounded down to a whole number of spectrogram
+        frames (at least one), so with the default ``frmlen_ms`` a 10 ms
+        request gives a 16 ms hop. ``RSF.times`` reports the actual hop.
     """
 
     # General
