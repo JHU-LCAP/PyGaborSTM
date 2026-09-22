@@ -149,9 +149,12 @@ jobs:
       # would mean three guards interrogating three different artifacts.
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
+          # Named with the short sha: a downloaded wheel is otherwise
+          # indistinguishable from any other dev build of the same version.
+          name: dist-${{ github.sha }}
           path: dist/
           if-no-files-found: error
+          retention-days: 30
 
   guard-metadata:
     name: Guard - distribution metadata
@@ -165,7 +168,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: dist-${{ github.sha }}
           path: dist
 
       - name: Install the wheel, metadata only
@@ -245,7 +248,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: dist-${{ github.sha }}
           path: dist
 
       # Phase 1 proves the dependency table does not drag the plotting stack
@@ -328,7 +331,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: dist-${{ github.sha }}
           path: dist
 
       - run: pip install dist/*.whl

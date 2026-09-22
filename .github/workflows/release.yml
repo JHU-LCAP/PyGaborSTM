@@ -67,6 +67,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install packaging for the version check
+        run: pip install --upgrade "packaging>=24"
+
       - name: Tag must match [project].version
         id: meta
         run: |
@@ -84,8 +87,39 @@ jobs:
                   f"Expected 'v{version}'. Bump the version or retag; do not "
                   f"publish a mismatch."
               )
+
+          # Between releases pyproject carries X.Y.Z.dev0. Tagging one of those
+          # would publish a development version to PyPI, permanently.
+          from packaging.version import Version
+
+          parsed = Version(version)
+          if parsed.is_devrelease or parsed.is_prerelease:
+              sys.exit(
+                  f"version {version!r} is a development or pre-release. "
+                  f"Set [project].version to a final release before tagging."
+              )
           print(f"version={version}")
           PY
+
+      # PyPI reserves a version permanently, and deleting a release does not
+      # free it. Catch a forgotten version bump here rather than after the
+      # TestPyPI upload has already spent the number.
+      - name: Version must not already exist on PyPI
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          for index in pypi.org test.pypi.org; do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+                     "https://${index}/pypi/pygaborstm/${VERSION}/json")
+            case "$CODE" in
+              404) echo "${index}: ${VERSION} is free" ;;
+              200) echo "::error::${index} already has pygaborstm ${VERSION}."
+                   echo "::error::Versions are permanent; bump pyproject.toml and retag."
+                   exit 1 ;;
+              *)   echo "::error::${index} returned HTTP ${CODE} for ${VERSION}"
+                   exit 1 ;;
+            esac
+          done
 
       - name: Build
         run: |
@@ -279,20 +313,68 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Full history: the commit list below needs it, and the default depth 1
+      # has nothing to log.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
 
-      # --generate-notes builds the changelog from merged PRs, which is why
-      # there is no hand-maintained CHANGELOG.md in the repo.
+      # The generated notes give PR titles grouped by label (see
+      # .github/release.yml). They cannot be combined with --notes, so fetch
+      # them from the API and append the commit list, which is what makes a
+      # release traceable to exact commits rather than just PR numbers.
+      - name: Build release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            echo "previous tag: ${PREV}"
+            RANGE="${PREV}..${TAG}"
+            GENERATED=$(gh api --method POST "repos/${REPO}/releases/generate-notes" \
+              -f tag_name="${TAG}" -f previous_tag_name="${PREV}" --jq .body)
+          else
+            echo "no previous tag; listing all commits"
+            RANGE="${TAG}"
+            GENERATED=$(gh api --method POST "repos/${REPO}/releases/generate-notes" \
+              -f tag_name="${TAG}" --jq .body)
+          fi
+
+          {
+            echo "$GENERATED"
+            echo
+            echo "### Commits"
+            echo
+            git log --no-merges --format='- `%h` %s' "$RANGE"
+            echo
+            echo "Released from \`$(git rev-parse HEAD)\`."
+          } > NOTES.md
+
+          # GitHub rejects bodies past ~125k characters, and this step runs
+          # after PyPI has already accepted the upload, so truncate rather
+          # than fail the release.
+          if [ "$(wc -c < NOTES.md)" -gt 100000 ]; then
+            head -c 100000 NOTES.md > NOTES.trunc
+            printf '\n\n_Notes truncated; see the full compare link above._\n' >> NOTES.trunc
+            mv NOTES.trunc NOTES.md
+            echo "::warning::release notes truncated to fit GitHub's limit"
+          fi
+
+          echo "--- notes ---"
+          cat NOTES.md
+
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes \
+            --notes-file NOTES.md \
             --verify-tag

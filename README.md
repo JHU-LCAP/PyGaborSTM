@@ -58,6 +58,35 @@ cd PyGaborSTM
 poetry install
 ```
 
+### Depending on unreleased work
+
+Nothing is published between releases. To build against `main`, pin a commit:
+
+```toml
+# your pyproject.toml
+pygaborstm = { git = "https://github.com/JHU-LCAP/PyGaborSTM.git", rev = "<sha>" }
+```
+
+Between releases the version reads `X.Y.Z.dev0` for every commit, so it tells
+you which release is being worked toward, not which commit you have. The commit
+is recorded by pip at install time and read back with:
+
+```python
+>>> import pygaborstm as stm
+>>> stm.build_info()
+{'version': '0.2.0.dev0', 'source': 'git', 'commit': 'a1b2c3d...', 'url': '...'}
+```
+
+This works even if you pinned a branch: pip records the commit it resolved.
+An install from PyPI reports `source: 'index'` and no commit, because there the
+version identifies the build.
+
+To see what a pinned commit contains relative to the last release:
+
+```bash
+git log --oneline v0.1.0..<sha>
+```
+
 ### CUDA Toolkit
 The CuPy wheels bundle the CUDA runtime, so a separate toolkit install is only
 needed if you want `nvcc` and the profiling tools.
