@@ -50,7 +50,10 @@ from .structs import RSF, Spectrogram
 
 # Resolved by type checkers and IDEs without importing matplotlib at runtime.
 if TYPE_CHECKING:
-    from . import analysis, plot
+    # Redundant aliases mark these as re-exports; they are public but kept out
+    # of __all__ so star-import does not require the viz extra.
+    from . import analysis as analysis
+    from . import plot as plot
 
 try:
     __version__ = _dist_version("pygaborstm")
@@ -69,9 +72,9 @@ __all__ = [  # noqa: RUF022 - grouped by meaning, not alphabetised
     # Data structures
     "Spectrogram",
     "RSF",
-    # Namespaced modules
-    "analysis",
-    "plot",
+    # Namespaced modules. plot and analysis are deliberately absent: they
+    # are reachable as attributes, but listing them here would make
+    # `from pygaborstm import *` require the viz extra.
     "structs",
     # Metadata
     "__version__",
@@ -97,4 +100,6 @@ def __getattr__(name: str) -> ModuleType:
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    # _LAZY_SUBMODULES explicitly: they are public and should be discoverable
+    # before they have been touched, even though they are not in __all__.
+    return sorted(set(globals()) | set(__all__) | _LAZY_SUBMODULES)

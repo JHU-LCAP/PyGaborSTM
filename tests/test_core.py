@@ -153,6 +153,17 @@ class TestFrameTimes:
 
         np.testing.assert_array_equal(chained.times, staged.times)
 
+    def test_times_match_the_frames_actually_integrated(self, audio_tone):
+        # Ground truth from the integration indices, not from frame_times
+        # itself: comparing the two callers of one function only proves they
+        # share it.
+        model = stm.PyGaborSTM()
+        spec = model.spectrogram(audio_tone)
+        rsf = model.rsf(spec)
+
+        starts = np.asarray(model._gabor_model._frame_indices)[:, 0]
+        np.testing.assert_allclose(rsf.times, np.asarray(spec.times)[starts])
+
     def test_shift_above_frame_length_is_not_quantised(self):
         model = stm.PyGaborSTM(stm.Config(rsf_frame_shift_ms=32, frmlen_ms=16))
         assert model._gabor_model.effective_frame_shift_ms == 32.0

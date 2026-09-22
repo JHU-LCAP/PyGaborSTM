@@ -113,7 +113,12 @@ def is_available() -> bool:
     if not _HAS_CUPY:
         return False
     try:
-        _get_kernel(1, "float32")
+        if cp.cuda.runtime.getDeviceCount() < 1:
+            return False
+        # RawKernel construction is lazy, so launch the stub: compiling it
+        # alone would return True on a machine with no usable device.
+        kernel = _get_kernel(1, "float32")
+        kernel.compile()
         return True
     except Exception as e:
         logger.warning("batched_sosfilt kernel unavailable: %s", e)

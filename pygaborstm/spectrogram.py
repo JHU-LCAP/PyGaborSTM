@@ -130,7 +130,11 @@ class AuditorySpectrogram:
 
     def __setstate__(self, state: dict) -> None:
         self.__dict__.update(state)
+        # Re-resolve, then take the answer: a model pickled on a GPU box may
+        # be loaded where no device exists, and a stale use_gpu would leave
+        # the y1 fast path enabled against numpy arrays.
         self.device = resolve_device(self.use_gpu)
+        self.use_gpu = self.device.on_gpu
         self._init_gammatone_filters()
         self._init_y1_fast_path()
         self._y5_kernel_fft = None
@@ -215,7 +219,7 @@ class AuditorySpectrogram:
         self._batched_sosfilt = None
         self._sos_device_f32 = None
         if (
-            self.use_gpu
+            self.device.on_gpu
             and _batched_sosfilt_impl is not None
             and _kernel_is_available()
             and self.float_dtype == np.float32
@@ -298,7 +302,12 @@ class AuditorySpectrogram:
 
     def _downsample(self, spectrogram):
         """Downsample using device-native resample_poly (no CPU round-trip on GPU)."""
-        return self.signal.resample_poly(spectrogram, up=1, down=self._L_frm, axis=1)
+        out = self.signal.resample_poly(spectrogram, up=1, down=self._L_frm, axis=1)
+        # cupyx's resample_poly upcasts float32 to float64 where scipy's does
+        # not. Left alone, the Gabor stage would then run its FFTs in double
+        # on GPU only, making the chained path slower than the staged one and
+        # giving the two routes different results.
+        return out.astype(self.float_dtype, copy=False)
 
     # ----- public API --------------------------------------------------------
 
@@ -336,7 +345,10 @@ class AuditorySpectrogram:
         y5 = xp.cbrt(y5)
         y5 = self._downsample(y5)
 
-        return y5.T  # (n_freq, n_time) → (n_time, n_freq)
+        # Contiguous, not a transposed view: cuFFT gives different float32
+        # results for the same values in a different layout, which made the
+        # chained and staged paths disagree on GPU.
+        return xp.ascontiguousarray(y5.T)  # (n_freq, n_time) → (n_time, n_freq)
 
     def compute(self, audio: np.ndarray) -> Spectrogram:
         """Compute the spectrogram and copy the result to host as a dataclass.

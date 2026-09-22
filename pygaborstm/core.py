@@ -88,12 +88,6 @@ class PyGaborSTM:
         """
         return self._gabor_model.compute(spec)
 
-    # NOTE: chained compute_device runs ~15ms slower than calling
-    # spectrogram()/rsf() separately on single files. Cause appears to be
-    # device-side allocation pattern interacting with cuFFT — gabor stage runs
-    # ~17ms when spec arrives via host-DMA upload but ~41ms when spec arrives
-    # from a prior device kernel. Batch throughput is unaffected. Investigate
-    # with nsys if it ever matters.
     def compute_device(self, audio: np.ndarray):
         """Run the full pipeline on device with no intermediate host transfer.
 

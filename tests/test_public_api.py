@@ -26,10 +26,12 @@ class TestLazySubmodules:
         assert out.stdout.strip() == "False"
 
     def test_attribute_access_loads_the_submodule(self):
+        pytest.importorskip("matplotlib", reason="needs pygaborstm[viz]")
         assert stm.plot.__name__ == "pygaborstm.plot"
         assert stm.analysis.__name__ == "pygaborstm.analysis"
 
     def test_from_import_works(self):
+        pytest.importorskip("matplotlib", reason="needs pygaborstm[viz]")
         from pygaborstm import plot
 
         assert plot.plt_rsf is not None
@@ -63,9 +65,15 @@ class TestLazySubmodules:
 
 class TestExports:
     def test_all_names_are_reachable(self):
+        # __all__ deliberately excludes plot/analysis, so this stays true on a
+        # bare install.
         for name in stm.__all__:
             assert getattr(stm, name) is not None
 
-    def test_version_is_set(self):
-        assert isinstance(stm.__version__, str)
-        assert stm.__version__
+    def test_version_matches_the_installed_distribution(self):
+        # Asserting only "is a non-empty string" passes on the
+        # "0.0.0.dev0" fallback, so it cannot detect broken metadata wiring.
+        from importlib.metadata import version
+
+        assert stm.__version__ == version("pygaborstm")
+        assert stm.__version__ != "0.0.0.dev0"

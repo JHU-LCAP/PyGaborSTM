@@ -152,6 +152,14 @@ class GaborFilterbank:
         """Active array module. Derived from :attr:`device`, never stored."""
         return self.device.xp
 
+    def _frames_per(self, duration_ms: float) -> int:
+        """How many whole spectrogram frames fit in ``duration_ms``.
+
+        A single division: dividing by ``time_per_frame`` instead is inexact
+        and silently truncates exact multiples, e.g. 36 ms at frmlen 12 ms.
+        """
+        return int(duration_ms / self.frmlen_ms)
+
     @property
     def effective_frame_shift_ms(self) -> float:
         """Actual RSF hop in ms, after quantisation to whole frames.
@@ -162,7 +170,7 @@ class GaborFilterbank:
         """
         shift = getattr(self, "_frame_shift", None)
         if shift is None:
-            shift = max(1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame))
+            shift = max(1, self._frames_per(self.rsf_frame_shift_ms))
         return shift * self.frmlen_ms
 
     def frame_times(self, n_frames: int) -> np.ndarray:
@@ -184,6 +192,7 @@ class GaborFilterbank:
     def __setstate__(self, state: dict) -> None:
         self.__dict__.update(state)
         self.device = resolve_device(self.use_gpu)
+        self.use_gpu = self.device.on_gpu
 
     # ----- rates/scales (config-dependent, computed at init) ------------------
 
@@ -244,10 +253,8 @@ class GaborFilterbank:
 
         # Frame integration. The hop is quantised to whole spectrogram frames,
         # so the effective shift can exceed the requested one.
-        window_size = int(self.rsf_frame_size_ms / 1000.0 / self.time_per_frame)
-        frame_shift = max(
-            1, int(self.rsf_frame_shift_ms / 1000.0 / self.time_per_frame)
-        )
+        window_size = self._frames_per(self.rsf_frame_size_ms)
+        frame_shift = max(1, self._frames_per(self.rsf_frame_shift_ms))
         n_frames = max(1, (n_time - window_size) // frame_shift + 1)
         if n_frames == 1:
             window_size = n_time
