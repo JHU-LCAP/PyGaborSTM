@@ -149,8 +149,16 @@ class AuditorySpectrogram:
         )
 
     def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
+        audio = np.asarray(audio)
         if audio.size == 0:
             raise ValueError("audio is empty; expected at least one sample.")
+        shape = audio.shape
+        audio = np.squeeze(audio)
+        if audio.ndim != 1:
+            raise ValueError(
+                f"audio has shape {shape}; expected a 1-D mono signal. Downmix "
+                f"first, e.g. audio.mean(axis=1) for (samples, channels)."
+            )
         if audio.size < self._L_frm:
             raise ValueError(
                 f"audio has {audio.size} samples, fewer than one spectrogram "
@@ -330,9 +338,6 @@ class AuditorySpectrogram:
             backend (numpy or cupy).
         """
         xp = self.xp
-
-        if audio.ndim > 1:
-            audio = audio.flatten()
 
         audio = self._preprocess_audio(audio)
         self._ensure_cache(len(audio))

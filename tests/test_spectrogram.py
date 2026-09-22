@@ -170,3 +170,14 @@ class TestInputValidation:
         corrupted[0] = np.nan
         with pytest.raises(ValueError, match="NaN or inf"):
             AuditorySpectrogram().compute(corrupted)
+
+    def test_stereo_audio_rejected(self, audio_tone):
+        # Used to be flattened to interleaved samples of twice the duration.
+        stereo = np.stack([audio_tone, audio_tone], axis=1)
+        with pytest.raises(ValueError, match="1-D mono"):
+            AuditorySpectrogram().compute(stereo)
+
+    def test_singleton_channel_axis_accepted(self, audio_tone):
+        expected = AuditorySpectrogram().compute(audio_tone).data
+        got = AuditorySpectrogram().compute(audio_tone[:, None]).data
+        np.testing.assert_array_equal(got, expected)
