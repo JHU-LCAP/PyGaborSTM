@@ -240,7 +240,7 @@ jobs:
           done
           FETCHED=$(ls fetched/pygaborstm-*)
           echo "fetched: ${FETCHED}"
-          GOT=$(sha256sum "$FETCHED" | cut -d' ' -f1)
+          GOT=$(python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$FETCHED")
           WANT=$(grep -F "$(basename "$FETCHED")" SHA256SUMS | cut -d' ' -f1)
           if [ -z "$WANT" ]; then
             echo "::error::$(basename "$FETCHED") is not in the built SHA256SUMS"
