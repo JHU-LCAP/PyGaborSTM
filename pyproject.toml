@@ -1,6 +1,6 @@
 [project]
 name = "pygaborstm"
-version = "0.2.0.dev0"
+version = "0.1.1.dev0"
 description = "Rate-Scale-Frequency (RSF) representations from audio via bio-inspired auditory spectrograms and 2D Gabor filterbanks."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -57,8 +57,19 @@ viz = [
 # CuPy publishes manylinux and win_amd64 wheels only. The marker makes these
 # extras a no-op on macOS so the install still succeeds there and the library
 # falls back to NumPy with a warning, instead of failing to resolve.
-cuda12 = ["cupy-cuda12x (>=13.0,<15.0) ; sys_platform != 'darwin'"]
-cuda13 = ["cupy-cuda13x (>=14.0.1,<15.0) ; sys_platform != 'darwin'"]
+# cuda-toolkit is the same set CuPy's own [ctk] extra pulls, so only the
+# NVIDIA driver is needed. The two toolkit versions conflict, so the extras
+# are marked mutually exclusive or Poetry cannot lock them. The extra == must
+# be written out: poetry-core drops the implicit one once a marker mentions
+# extra at all.
+cuda12 = [
+    "cupy-cuda12x (>=14.0,<15.0) ; sys_platform != 'darwin'",
+    "cuda-toolkit[cublas,cudart,cufft,curand,cusolver,cusparse,nvrtc] (==12.*) ; sys_platform != 'darwin' and extra == 'cuda12' and extra != 'cuda13'",
+]
+cuda13 = [
+    "cupy-cuda13x (>=14.0.1,<15.0) ; sys_platform != 'darwin'",
+    "cuda-toolkit[cublas,cudart,cufft,curand,cusolver,cusparse,nvrtc] (==13.*) ; sys_platform != 'darwin' and extra == 'cuda13' and extra != 'cuda12'",
+]
 
 [project.urls]
 Homepage = "https://github.com/JHU-LCAP/PyGaborSTM"

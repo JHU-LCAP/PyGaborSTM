@@ -1,10 +1,9 @@
 # PyGaborSTM
 
-[![PyPI](https://img.shields.io/pypi/v/pygaborstm)](https://pypi.org/project/pygaborstm/)
-[![Python](https://img.shields.io/pypi/pyversions/pygaborstm)](https://pypi.org/project/pygaborstm/)
+[![PyPI](https://img.shields.io/pypi/v/pygaborstm?cacheSeconds=3600)](https://pypi.org/project/pygaborstm/)
 [![CI](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml/badge.svg)](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml)
 [![Docs](https://readthedocs.org/projects/pygaborstm/badge/?version=latest)](https://pygaborstm.readthedocs.io/en/latest/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/pypi/l/pygaborstm?cacheSeconds=3600)](LICENSE)
 
 PyGaborSTM is a Python library for extracting Rate-Scale-Frequency (RSF) representations from audio signals using bio-inspired auditory spectrograms and 2D Gabor filterbanks. Documentation can be found [here](https://pygaborstm.readthedocs.io/en/latest/).
 
@@ -17,7 +16,8 @@ The project is `PyGaborSTM`; the package you install and import is lowercase
 ## Installation
 
 ```bash
-pip install pygaborstm
+pip install pygaborstm          # pip
+poetry add pygaborstm           # poetry
 ```
 
 This is the CPU install and works on macOS, Linux and Windows. It pulls only
@@ -28,6 +28,7 @@ is an extra so the core install stays small:
 
 ```bash
 pip install 'pygaborstm[viz]'
+poetry add "pygaborstm[viz]"
 ```
 
 ### GPU (optional, NVIDIA only)
@@ -36,10 +37,17 @@ Pick the extra matching your CUDA version, which `nvidia-smi` reports:
 ```bash
 pip install 'pygaborstm[cuda12]'   # CUDA 12.x
 pip install 'pygaborstm[cuda13]'   # CUDA 13.x
+
+poetry add "pygaborstm[cuda12]"
+poetry add "pygaborstm[cuda13]"
 ```
 
-Install only one: both provide the `cupy` module. CuPy has no macOS wheels, so
-on macOS these extras install nothing and the library runs on CPU.
+Install only one: both provide the `cupy` module. The extra also pulls the
+CUDA libraries from PyPI (1.6 GB for CUDA 13, 2.5 GB for CUDA 12), so only the
+NVIDIA driver needs to be installed; if you already have a CUDA toolkit and
+want to skip that download, install `cupy-cuda13x` (or `cupy-cuda12x`) directly
+instead of the extra. CuPy has no macOS wheels, so on macOS these extras
+install nothing and the library runs on CPU.
 
 Then set `use_gpu=True`:
 
@@ -74,7 +82,7 @@ is recorded by pip at install time and read back with:
 ```python
 >>> import pygaborstm as stm
 >>> stm.build_info()
-{'version': '0.2.0.dev0', 'source': 'git', 'commit': 'a1b2c3d...', 'url': '...'}
+{'version': '0.1.1.dev0', 'source': 'git', 'commit': 'a1b2c3d...', 'url': '...'}
 ```
 
 This works even if you pinned a branch: pip records the commit it resolved.
@@ -87,36 +95,28 @@ To see what a pinned commit contains relative to the last release:
 git log --oneline v0.1.0..<sha>
 ```
 
-### CUDA Toolkit
-The CuPy wheels bundle the CUDA runtime, so a separate toolkit install is only
-needed if you want `nvcc` and the profiling tools.
-
-Get it from https://developer.nvidia.com/cuda-toolkit, then add to your shell
-profile:
-
-```bash
-export PATH=/usr/local/cuda/bin:$PATH
-export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
-```
-
 ## Quick Start
 ```python
+import numpy as np
 import pygaborstm as stm
 
-# Create model (CPU)
-model = stm.PyGaborSTM()
+# Any mono 1-D float array at Config.sample_rate (16 kHz by default).
+# It is mean-removed and peak-normalised before analysis.
+sr = 16000
+t = np.arange(2 * sr) / sr
+audio = np.sin(2 * np.pi * 440 * t)
 
-# Create model (GPU)
-model = stm.PyGaborSTM(config=stm.Config(use_gpu=True))
+model = stm.PyGaborSTM()                              # CPU
+# model = stm.PyGaborSTM(stm.Config(use_gpu=True))    # NVIDIA GPU
 
-# Compute spectrogram and RSF
-spec = model.spectrogram(audio)
-rsf = model.rsf(spec)
+spec = model.spectrogram(audio)   # (n_freq, n_time)
+rsf = model.rsf(spec)             # (n_frames, n_rates, n_scales, n_freq)
+rsf = model.compute(audio)        # both stages, no intermediate host copy
 
-# Visualization
+# Plotting needs the [viz] extra.
 stm.plot.plt_spectrogram(spec)
 stm.plot.plt_rsf(rsf)
-stm.plot.plt_rsf(rsf, fold=True)  # Symmetric folding
+stm.plot.plt_rsf(rsf, fold=True)  # symmetric folding
 ```
 
 See `notebooks/example_usage.ipynb` for more examples.
@@ -158,6 +158,7 @@ PyGaborSTM/
 ├── pygaborstm/
 │   ├── __init__.py      # Public API
 │   ├── config.py        # Config dataclass
+│   ├── constants.py     # Standard rate/scale grids, resolution multipliers
 │   ├── structs.py       # Spectrogram, RSF dataclasses
 │   ├── spectrogram.py   # AuditorySpectrogram
 │   ├── gabor.py         # GaborFilterbank

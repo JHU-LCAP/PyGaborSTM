@@ -8,7 +8,7 @@ repository root::
 
 Checks, in order:
 
-1. pygaborstm was imported from site-packages, not from a checkout. This is the
+1. pygaborstm was imported from an installed location, not a checkout. This is the
    check the script exists for: run from the repository root, ``import
    pygaborstm`` resolves to ``./pygaborstm/`` and everything below passes even
    against an empty wheel.
@@ -54,7 +54,8 @@ def main() -> None:
     modules_after_import = set(sys.modules)
 
     module_file = Path(stm.__file__).resolve()
-    if "site-packages" not in module_file.parts:
+    installed_dirs = {"site-packages", "dist-packages"}
+    if not (installed_dirs & set(module_file.parts)):
         _fail(
             f"pygaborstm was imported from {module_file}, which is not an "
             f"installed distribution. Run this from a directory that is not the "

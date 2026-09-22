@@ -170,3 +170,25 @@ class TestInputValidation:
         corrupted[0] = np.nan
         with pytest.raises(ValueError, match="NaN or inf"):
             AuditorySpectrogram().compute(corrupted)
+
+    def test_stereo_audio_rejected(self, audio_tone):
+        # Used to be flattened to interleaved samples of twice the duration.
+        stereo = np.stack([audio_tone, audio_tone], axis=1)
+        with pytest.raises(ValueError, match="1-D mono"):
+            AuditorySpectrogram().compute(stereo)
+
+    def test_singleton_channel_axis_accepted(self, audio_tone):
+        expected = AuditorySpectrogram().compute(audio_tone).data
+        got = AuditorySpectrogram().compute(audio_tone[:, None]).data
+        np.testing.assert_array_equal(got, expected)
+
+    @pytest.mark.gpu
+    def test_cupy_input_accepted(self, audio_tone):
+        cp = pytest.importorskip("cupy")
+        model = AuditorySpectrogram(stm.Config(use_gpu=True))
+        if not model.device.on_gpu:
+            pytest.skip("no CUDA device")
+        expected = model.compute(audio_tone).data
+        got = model.compute(cp.asarray(audio_tone)).data
+        # float32 reductions run on the device for the CuPy input.
+        np.testing.assert_allclose(got, expected, rtol=1e-3, atol=1e-5)

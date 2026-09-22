@@ -74,7 +74,7 @@ jobs:
         id: meta
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
-          import os, pathlib, sys, tomllib
+          import os, pathlib, re, sys, tomllib
 
           version = tomllib.loads(
               pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
@@ -86,6 +86,17 @@ jobs:
                   f"tag {tag!r} does not match [project].version {version!r}. "
                   f"Expected 'v{version}'. Bump the version or retag; do not "
                   f"publish a mismatch."
+              )
+
+          # CITATION.cff is bumped by hand too, and a stale one is what
+          # people end up citing.
+          cff = pathlib.Path("CITATION.cff").read_text(encoding="utf-8")
+          cited = re.search(r"^version:\s*(\S+)\s*$", cff, re.M)
+          if cited is None or cited.group(1) != version:
+              sys.exit(
+                  f"CITATION.cff version is "
+                  f"{cited.group(1) if cited else 'missing'}, [project].version "
+                  f"is {version!r}. Bump CITATION.cff before tagging."
               )
 
           # Between releases pyproject carries X.Y.Z.dev0. Tagging one of those
@@ -191,6 +202,60 @@ jobs:
           # reused. Deliberately absent on the real PyPI job below.
           skip-existing: true
           print-hash: true
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: hashes
+
+      # skip-existing means TestPyPI may hold an OLDER build of some file for
+      # this version. The smoke jobs only download the wheel, so a stale sdist
+      # would never be compared, yet the current sdist would still be promoted
+      # to PyPI. Compare every artifact we are about to promote against what
+      # TestPyPI actually serves.
+      - name: Every artifact on TestPyPI matches the build being promoted
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python - <<'PY'
+          import json, os, sys, time, urllib.request
+
+          version = os.environ["VERSION"]
+          built = {}
+          for line in open("SHA256SUMS", encoding="utf-8"):
+              digest, name = line.split()
+              built[name.lstrip("./")] = digest
+
+          url = f"https://test.pypi.org/pypi/pygaborstm/{version}/json"
+          served = None
+          for attempt in range(8):
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as r:
+                      data = json.load(r)
+                  served = {u["filename"]: u["digests"]["sha256"] for u in data["urls"]}
+                  if set(built) <= set(served):
+                      break
+              except Exception as exc:
+                  print(f"attempt {attempt + 1}: {exc}")
+              time.sleep(20)
+
+          if served is None:
+              sys.exit("could not read the TestPyPI file list")
+
+          bad = []
+          for name, digest in built.items():
+              if name not in served:
+                  bad.append(f"{name}: not on TestPyPI")
+              elif served[name] != digest:
+                  bad.append(f"{name}: TestPyPI has {served[name][:12]}, built {digest[:12]}")
+          if bad:
+              print("::error::TestPyPI does not hold the artifacts being promoted:")
+              for b in bad:
+                  print(f"::error::  {b}")
+              print("::error::A stale upload is being served; bump the version rather than promote it.")
+              sys.exit(1)
+          for name in built:
+              print(f"ok  {name}")
+          PY
 
   smoke-testpypi:
     name: Install from TestPyPI (${{ matrix.os }}, py${{ matrix.python-version }})
@@ -346,7 +411,20 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          # The baseline is the last *published release*, not merely the
+          # nearest tag. A tag pattern cannot tell a real release from an
+          # experiment or a failed attempt, and picking one of those silently
+          # truncates the changelog to "since that tag".
+          PREV=$(gh release list --repo "${REPO}" --limit 100 \
+                   --json tagName,isDraft,isPrerelease,createdAt \
+                   --jq '[.[] | select(.isDraft==false and .isPrerelease==false)
+                          | .tagName] | map(select(. != "'"${TAG}"'")) | .[0]' \
+                 2>/dev/null || true)
+          # Fall back to tag order only if the API gave nothing, and require a
+          # numeric version so 'v-experiment' cannot be chosen.
+          if [ -z "$PREV" ]; then
+            PREV=$(git describe --tags --abbrev=0 --match='v[0-9]*' "${TAG}^" 2>/dev/null || true)
+          fi
           if [ -n "$PREV" ]; then
             echo "previous tag: ${PREV}"
             RANGE="${PREV}..${TAG}"
@@ -363,11 +441,19 @@ jobs:
           # and commit lists go underneath, collapsed: a release page that
           # opens with every PR since the repo began describes how the repo
           # was built, not what the release does.
-          SUMMARY=$(sed '/^<!--/,/-->/d' .github/RELEASE_NOTES.md 2>/dev/null | sed '/^[[:space:]]*$/d')
+          # Python, not sed: a single-line <!-- comment --> makes a sed range
+          # start and never close, deleting the rest of the file. That silently
+          # ate the whole summary.
+          python - <<'STRIP' > SUMMARY.md
+          import pathlib, re
+          raw = pathlib.Path(".github/RELEASE_NOTES.md").read_text(encoding="utf-8", errors="replace")
+          print(re.sub(r"<!--.*?-->", "", raw, flags=re.S).strip())
+          STRIP
+          SUMMARY=$(tr -d '[:space:]' < SUMMARY.md)
 
           {
             if [ -n "$SUMMARY" ]; then
-              sed '/^<!--/,/-->/d' .github/RELEASE_NOTES.md
+              cat SUMMARY.md
               echo
               echo "<details><summary>All changes</summary>"
               echo
