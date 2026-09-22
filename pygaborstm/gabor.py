@@ -155,10 +155,15 @@ class GaborFilterbank:
     def _frames_per(self, duration_ms: float) -> int:
         """How many whole spectrogram frames fit in ``duration_ms``.
 
-        A single division: dividing by ``time_per_frame`` instead is inexact
-        and silently truncates exact multiples, e.g. 36 ms at frmlen 12 ms.
+        Exact multiples must not truncate. A single division avoids the
+        worst of it, but binary floating point still puts e.g. 33 / 1.1 at
+        29.999999999999996, so snap quotients within noise of an integer.
         """
-        return int(duration_ms / self.frmlen_ms)
+        frames = duration_ms / self.frmlen_ms
+        nearest = round(frames)
+        if abs(frames - nearest) <= 1e-9 * max(1.0, abs(frames)):
+            return int(nearest)
+        return int(frames)
 
     @property
     def effective_frame_shift_ms(self) -> float:
@@ -197,8 +202,11 @@ class GaborFilterbank:
     # ----- rates/scales (config-dependent, computed at init) ------------------
 
     def _get_rates_scales(self, cfg: Config) -> tuple[np.ndarray, np.ndarray]:
-        cfg_rates = np.asarray(cfg.rates, dtype=np.float64)
-        cfg_scales = np.asarray(cfg.scales, dtype=np.float64)
+        # copy, not asarray: the kernels are built once and cached, so
+        # aliasing the caller's arrays lets a later in-place edit relabel the
+        # output without changing what was actually computed.
+        cfg_rates = np.array(cfg.rates, dtype=np.float64, copy=True)
+        cfg_scales = np.array(cfg.scales, dtype=np.float64, copy=True)
 
         if cfg.resolution not in self.RESOLUTION_MULTIPLIERS:
             raise ValueError(

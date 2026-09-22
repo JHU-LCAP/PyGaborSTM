@@ -120,8 +120,20 @@ class Config:
             ("rsf_frame_shift_ms", self.rsf_frame_shift_ms),
         )
         for name, value in positive:
+            # NaN fails every comparison, so check finiteness first or it
+            # slips through and the whole RSF comes back non-finite.
+            if not np.isfinite(value):
+                raise ValueError(f"{name} must be finite, got {value}.")
             if value <= 0:
                 raise ValueError(f"{name} must be > 0, got {value}.")
+
+        tau_samples = int((self.tau_ms / 1000.0) * self.sample_rate)
+        if tau_samples < 1:
+            raise ValueError(
+                f"tau_ms={self.tau_ms} at sample_rate={self.sample_rate} Hz gives "
+                f"a {tau_samples}-sample integration kernel; at least 1 is "
+                f"required. Use tau_ms >= {1000.0 / self.sample_rate:g}."
+            )
 
         samples_per_frame = int((self.frmlen_ms / 1000.0) * self.sample_rate)
         if samples_per_frame < 1:
@@ -151,6 +163,10 @@ class Config:
         scales = np.asarray(self.scales, dtype=np.float64)
         if rates.size == 0 or scales.size == 0:
             raise ValueError("rates and scales must each contain at least one value.")
+        if not np.all(np.isfinite(rates)):
+            raise ValueError("rates must all be finite.")
+        if not np.all(np.isfinite(scales)):
+            raise ValueError("scales must all be finite.")
         if not np.any(rates > 0):
             raise ValueError("rates must contain at least one positive value.")
         if np.any(scales <= 0):

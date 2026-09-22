@@ -76,6 +76,23 @@ class TestValidation:
         with pytest.raises(ValueError, match=f"{field} must be > 0"):
             Config(**{field: 0})
 
+    @pytest.mark.parametrize("field", ["f_min", "octaves", "tau_ms", "erb_scale"])
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_non_finite_values_rejected(self, field, bad):
+        # NaN fails every comparison, so a bare "<= 0" check lets it through
+        # and the whole RSF comes back non-finite.
+        with pytest.raises(ValueError, match="must be finite"):
+            Config(**{field: bad})
+
+    @pytest.mark.parametrize("field", ["rates", "scales"])
+    def test_non_finite_arrays_rejected(self, field):
+        with pytest.raises(ValueError, match="must all be finite"):
+            Config(**{field: np.array([2.0, float("nan")])})
+
+    def test_tau_shorter_than_one_sample_rejected(self):
+        with pytest.raises(ValueError, match="integration kernel"):
+            Config(tau_ms=0.001, sample_rate=16000)
+
     def test_window_shorter_than_frame_rejected(self):
         # Used to return an all-NaN RSF with no error at all.
         with pytest.raises(ValueError, match="entirely NaN"):
