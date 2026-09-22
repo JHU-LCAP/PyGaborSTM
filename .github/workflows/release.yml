@@ -108,18 +108,30 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          for index in pypi.org test.pypi.org; do
-            CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-                     "https://${index}/pypi/pygaborstm/${VERSION}/json")
-            case "$CODE" in
-              404) echo "${index}: ${VERSION} is free" ;;
-              200) echo "::error::${index} already has pygaborstm ${VERSION}."
-                   echo "::error::Versions are permanent; bump pyproject.toml and retag."
-                   exit 1 ;;
-              *)   echo "::error::${index} returned HTTP ${CODE} for ${VERSION}"
-                   exit 1 ;;
-            esac
-          done
+          # Only real PyPI is fatal. TestPyPI holding this version is the
+          # normal state after a release that got partway and was retried;
+          # the publish step uses skip-existing precisely so a retry works.
+          # Blocking on it makes every recoverable failure unrecoverable.
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+                   "https://test.pypi.org/pypi/pygaborstm/${VERSION}/json")
+          case "$CODE" in
+            404) echo "test.pypi.org: ${VERSION} is free" ;;
+            200) echo "::warning::test.pypi.org already has ${VERSION}; the "\
+                      "publish step will skip it and the smoke test will "\
+                      "verify the existing artifact matches this build." ;;
+            *)   echo "::warning::test.pypi.org returned HTTP ${CODE}" ;;
+          esac
+
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+                   "https://pypi.org/pypi/pygaborstm/${VERSION}/json")
+          case "$CODE" in
+            404) echo "pypi.org: ${VERSION} is free" ;;
+            200) echo "::error::pypi.org already has pygaborstm ${VERSION}."
+                 echo "::error::Versions are permanent; bump pyproject.toml and retag."
+                 exit 1 ;;
+            *)   echo "::error::pypi.org returned HTTP ${CODE} for ${VERSION}"
+                 exit 1 ;;
+          esac
 
       - name: Build
         run: |
