@@ -1,7 +1,7 @@
 # PyGaborSTM
 
 [![PyPI](https://img.shields.io/pypi/v/pygaborstm?cacheSeconds=3600)](https://pypi.org/project/pygaborstm/)
-[![Python](https://img.shields.io/pypi/pyversions/pygaborstm?cacheSeconds=3600)](https://pygaborstm.readthedocs.io/en/latest/getting-started/)
+[![Python](https://img.shields.io/pypi/pyversions/pygaborstm?cacheSeconds=3600)](https://pypi.org/project/pygaborstm/)
 [![CI](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml/badge.svg)](https://github.com/JHU-LCAP/PyGaborSTM/actions/workflows/ci.yml)
 [![Docs](https://readthedocs.org/projects/pygaborstm/badge/?version=latest)](https://pygaborstm.readthedocs.io/en/latest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
