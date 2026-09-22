@@ -43,11 +43,11 @@ poetry add "pygaborstm[cuda13]"
 ```
 
 Install only one: both provide the `cupy` module. The extra also pulls the
-CUDA libraries from PyPI (about 1.6 GB), so only the NVIDIA driver needs to be
-installed; if you already have a CUDA toolkit and want to skip that download,
-install `cupy-cuda13x` (or `cupy-cuda12x`) directly instead of the extra. CuPy
-has no macOS wheels, so on macOS these extras install nothing and the library
-runs on CPU.
+CUDA libraries from PyPI (1.6 GB for CUDA 13, 2.5 GB for CUDA 12), so only the
+NVIDIA driver needs to be installed; if you already have a CUDA toolkit and
+want to skip that download, install `cupy-cuda13x` (or `cupy-cuda12x`) directly
+instead of the extra. CuPy has no macOS wheels, so on macOS these extras
+install nothing and the library runs on CPU.
 
 Then set `use_gpu=True`:
 
